@@ -1,0 +1,19 @@
+{
+  "name": "itr-emails-diarios",
+  "version": "0.1.0",
+  "description": "Envio diario de emails aos clientes da ITR Engenharia: um email por ordem de servico, com os ensaios/amostras atualizados no dia anterior, lidos do Airtable.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "inspecionar": "node ver_campos.js",
+    "enviar": "node enviar_todos.js",
+    "teste": "node enviar_todos.js --ignorar-data"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.13"
+  }
+}

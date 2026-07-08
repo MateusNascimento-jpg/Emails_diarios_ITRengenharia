@@ -1,0 +1,13 @@
+.env
+node_modules/
+*.log
+saida_*.txt
+testar_smtp.js
+diag.js
+ver_datas.js
+ver_status.js
+ver_linhas.js
+testar.js
+preview_email.html
+preview.png
+# IMPORTANTE: assets/logo.png DEVE subir (nao ignorar!)
