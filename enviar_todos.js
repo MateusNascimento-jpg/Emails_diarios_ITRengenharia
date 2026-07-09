@@ -67,6 +67,7 @@ async function executarEnvioDiario(opcoes = {}) {
     }
   }
 
+//Console para evitar falhas estruturais no envio de emails na dada prevista (manutenção) 
   console.log(`\nResumo: ${enviados} enviado(s), ${falhas} falha(s), ${semEmail} sem email.`);
   console.log(`[${new Date().toLocaleString('pt-BR')}] Envio diario concluido.\n`);
   return { enviados, falhas, semEmail };

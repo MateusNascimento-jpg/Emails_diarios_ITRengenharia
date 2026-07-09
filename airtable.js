@@ -1,24 +1,13 @@
 // ============================================================
 //  airtable.js  -  MODULO CENTRAL DE ACESSO AO AIRTABLE
 // ------------------------------------------------------------
-//  Responsabilidade unica: falar com o Airtable.
-//  - le a tabela/view do Airtable
-//  - IMPORTANTE: se usar uma view, ela NAO deve filtrar apenas "hoje".
-//    A regra de data fica no codigo: enviar as atualizacoes de ONTEM.
-//  - trata paginacao (a API traz de 100 em 100)
-//  - agrupa: por ID do cliente  ->  por ID da ordem de servico
-//
-//  Chaves de agrupamento = record IDs (rec...) vindos dos campos de link.
-//  Rotulos legiveis (nome do cliente, numero da OS) = campos "Texto".
-//
-//  Nada aqui envia email. Isso e responsabilidade de outro modulo.
-// ============================================================
+
 
 require('dotenv').config();
 
 const TOKEN = process.env.AIRTABLE_TOKEN;
 const BASE = process.env.AIRTABLE_BASE_ID;
-const VIEW = process.env.AIRTABLE_VIEW_ID; // opcional, mas se usar deve ser uma view SEM filtro de data 'hoje'
+const VIEW = process.env.AIRTABLE_VIEW_ID; 
 
 const TABELA_NOVOS_TRABALHOS = process.env.AIRTABLE_TABLE_ID || 'tblJAP4Av9sWm8SmL';
 
@@ -37,15 +26,16 @@ const STATUS_PERMITIDOS = [
 // ------------------------------------------------------------
 const CAMPOS = {
   // chaves de agrupamento (campos de link -> retornam ["rec..."])
-  clienteLink: 'Cliente',            // record id do cliente
-  osLink: 'Ordem de Serviço',        // record id da OS
+  clienteLink: 'Cliente',
+  osLink: 'Ordem de Serviço',
 
   // rotulos legiveis (strings) para exibir no email
   clienteTexto: 'Cliente Texto',
   osTexto: 'OS Texto',
 
-  // email de destino (lookup -> vem como array ["email@..."])
+  // dados do cliente vindos da tabela Clientes via lookup
   emailCliente: 'Email do Cliente',
+  cnpjCliente: 'CNPJ do Cliente',
 
   // conteudo de cada linha do email
   idTrabalho: 'ID Trabalho',
@@ -58,7 +48,7 @@ const CAMPOS = {
   dataConclusao: 'Data de Conclusão do Ensaio',
   dataEnvioRelatorio: 'Data de Envio do Relatório',
   dataAtualizacao: 'Data da Última Atualização Update', // usado no FILTRO de "ontem"
-}; 
+};
 
 // helper: extrai o primeiro record id de um campo de link.
 // campos de link vem como array (ex: ["rec123"]); pega o primeiro.
@@ -90,8 +80,10 @@ function ehDeOntem(valorData) {
   if (isNaN(d.getTime())) return false;
 
   // "agora" e "a data" convertidos para a data-calendario de Brasilia
-  const fmt = (dt) => dt.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }); // YYYY-MM-DD
-  const hojeBR = fmt(new Date());
+  const fmt = (dt) => dt.toLocaleDateString('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+  }); // YYYY-MM-DD
+
   const ontemBR = fmt(new Date(Date.now() - 24 * 60 * 60 * 1000));
   const dataBR = fmt(d);
 
@@ -114,10 +106,12 @@ async function buscarRegistrosDaView() {
 
   do {
     let url = `https://api.airtable.com/v0/${BASE}/${TABELA_NOVOS_TRABALHOS}?pageSize=100`;
+
     if (VIEW) url += `&view=${encodeURIComponent(VIEW)}`;
     if (offset) url += `&offset=${offset}`;
 
     const resp = await fetch(url, { headers });
+
     if (!resp.ok) {
       const corpo = await resp.text();
       throw new Error(`Airtable respondeu ${resp.status}: ${corpo}`);
@@ -136,7 +130,10 @@ async function buscarRegistrosDaView() {
 //   Transforma a lista crua em:
 //   [
 //     {
-//       clienteId, clienteNome,
+//       clienteId,
+//       clienteNome,
+//       email,
+//       cnpj,
 //       ordens: [
 //         { osId, osNome, linhas: [ {..dados do trabalho..}, ... ] },
 //         ...
@@ -174,15 +171,23 @@ function agruparPorClienteEOS(registros, opcoes = {}) {
         clienteId,
         clienteNome: texto(f[CAMPOS.clienteTexto]) || clienteId,
         email: texto(f[CAMPOS.emailCliente]), // lookup array -> string
+        cnpj: texto(f[CAMPOS.cnpjCliente]),   // lookup array -> string
         ordens: new Map(), // osId -> objeto ordem
       });
     }
+
     const cliente = clientes.get(clienteId);
 
     // se o email so aparecer em alguma linha posterior, captura assim que surgir
     if (!cliente.email) {
-      const possivel = texto(f[CAMPOS.emailCliente]);
-      if (possivel) cliente.email = possivel;
+      const possivelEmail = texto(f[CAMPOS.emailCliente]);
+      if (possivelEmail) cliente.email = possivelEmail;
+    }
+
+    // se o CNPJ so aparecer em alguma linha posterior, captura assim que surgir
+    if (!cliente.cnpj) {
+      const possivelCnpj = texto(f[CAMPOS.cnpjCliente]);
+      if (possivelCnpj) cliente.cnpj = possivelCnpj;
     }
 
     // garante a OS dentro do cliente
@@ -193,6 +198,7 @@ function agruparPorClienteEOS(registros, opcoes = {}) {
         linhas: [],
       });
     }
+
     const ordem = cliente.ordens.get(osId);
 
     // monta a linha (uma linha = um trabalho/ensaio dentro da OS)
@@ -208,11 +214,11 @@ function agruparPorClienteEOS(registros, opcoes = {}) {
     });
   }
 
-  // converte os Maps em arrays (mais facil de usar depois)
   return [...clientes.values()].map(c => ({
     clienteId: c.clienteId,
     clienteNome: c.clienteNome,
     email: c.email || '',
+    cnpj: c.cnpj || '',
     ordens: [...c.ordens.values()],
   }));
 }
