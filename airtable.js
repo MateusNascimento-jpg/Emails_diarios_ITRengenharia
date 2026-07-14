@@ -66,6 +66,46 @@ function texto(valor) {
 }
 
 // ------------------------------------------------------------
+// separarEmails(bruto, contexto)
+//   Converte uma string de e-mails (separados por ; ou ,) em um
+//   array limpo. Perdoa erros de separador e espacos.
+//   Loga (console.warn) o que for descartado por nao ter "@".
+//
+//   Aceita string OU array (lookup do Airtable pode vir como array):
+//   junta tudo primeiro e depois separa por ; ou ,.
+//
+//   contexto = nome do cliente/OS so para identificar no log.
+// ------------------------------------------------------------
+function separarEmails(bruto, contexto = '') {
+  if (!bruto) return [];
+
+  // lookup pode retornar array; vira string unica antes de separar
+  const comoTexto = Array.isArray(bruto) ? bruto.join(';') : String(bruto);
+
+  const itens = comoTexto
+    .split(/[;,]/)        // aceita ; OU , como separador
+    .map(e => e.trim())   // remove espacos das pontas
+    .filter(Boolean);     // remove vazios ("" de ";;" ou ";" no fim)
+
+  const validos = [];
+  const descartados = [];
+
+  for (const item of itens) {
+    if (item.includes('@')) validos.push(item);
+    else descartados.push(item);
+  }
+
+  if (descartados.length > 0) {
+    console.warn(
+      `[separarEmails] ${contexto ? `(${contexto}) ` : ''}` +
+      `Descartado(s) por nao conter "@": ${descartados.join(' | ')}`
+    );
+  }
+
+  return validos;
+}
+
+// ------------------------------------------------------------
 // FILTRO DE DATA: verifica se uma data (ISO) caiu ONTEM,
 // no fuso de Brasilia. Usado para enviar de manha o que foi
 // atualizado no dia anterior.
@@ -132,7 +172,7 @@ async function buscarRegistrosDaView() {
 //     {
 //       clienteId,
 //       clienteNome,
-//       email,
+//       emails,        // <-- agora ARRAY de e-mails ja limpos
 //       cnpj,
 //       ordens: [
 //         { osId, osNome, linhas: [ {..dados do trabalho..}, ... ] },
@@ -165,12 +205,15 @@ function agruparPorClienteEOS(registros, opcoes = {}) {
     const clienteId = primeiroId(f[CAMPOS.clienteLink]) || '(sem-cliente)';
     const osId = primeiroId(f[CAMPOS.osLink]) || '(sem-os)';
 
+    const nomeClienteRegistro = texto(f[CAMPOS.clienteTexto]) || clienteId;
+
     // garante o cliente no mapa
     if (!clientes.has(clienteId)) {
       clientes.set(clienteId, {
         clienteId,
-        clienteNome: texto(f[CAMPOS.clienteTexto]) || clienteId,
-        email: texto(f[CAMPOS.emailCliente]), // lookup array -> string
+        clienteNome: nomeClienteRegistro,
+        // separa ja na entrada; array de e-mails limpos (pode vir vazio)
+        emails: separarEmails(f[CAMPOS.emailCliente], nomeClienteRegistro),
         cnpj: texto(f[CAMPOS.cnpjCliente]),   // lookup array -> string
         ordens: new Map(), // osId -> objeto ordem
       });
@@ -178,10 +221,10 @@ function agruparPorClienteEOS(registros, opcoes = {}) {
 
     const cliente = clientes.get(clienteId);
 
-    // se o email so aparecer em alguma linha posterior, captura assim que surgir
-    if (!cliente.email) {
-      const possivelEmail = texto(f[CAMPOS.emailCliente]);
-      if (possivelEmail) cliente.email = possivelEmail;
+    // se os e-mails so aparecerem em alguma linha posterior, captura assim que surgir
+    if (cliente.emails.length === 0) {
+      const possiveis = separarEmails(f[CAMPOS.emailCliente], nomeClienteRegistro);
+      if (possiveis.length > 0) cliente.emails = possiveis;
     }
 
     // se o CNPJ so aparecer em alguma linha posterior, captura assim que surgir
@@ -217,7 +260,8 @@ function agruparPorClienteEOS(registros, opcoes = {}) {
   return [...clientes.values()].map(c => ({
     clienteId: c.clienteId,
     clienteNome: c.clienteNome,
-    email: c.email || '',
+    emails: c.emails || [],       // <-- array (novo)
+    email: (c.emails || []).join(', '), // <-- compat: string legivel, se algo antigo ainda ler .email
     cnpj: c.cnpj || '',
     ordens: [...c.ordens.values()],
   }));
@@ -238,5 +282,6 @@ module.exports = {
   buscarResumoDiario,
   buscarRegistrosDaView,
   agruparPorClienteEOS,
+  separarEmails, // exportado caso queira reusar/testar isoladamente
   CAMPOS,
 };

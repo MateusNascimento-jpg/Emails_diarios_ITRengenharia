@@ -50,20 +50,41 @@ async function verificarConexao() {
   return true;
 }
 
+// helper: normaliza "para" (array OU string) num ARRAY de e-mails limpos.
+// aceita array vindo do airtable.js (cliente.emails) ou string antiga.
+function normalizarPara(para) {
+  if (Array.isArray(para)) {
+    return para.map(e => String(e).trim()).filter(Boolean);
+  }
+  if (typeof para === 'string') {
+    return para.split(/[;,]/).map(e => e.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 // ------------------------------------------------------------
 // enviar({ para, assunto, html, texto })
-//   Respeita o MODO_TESTE: se ligado, redireciona.
+//   'para' pode ser array de e-mails OU string (compat).
+//   Respeita o MODO_TESTE: se ligado, redireciona tudo.
 // ------------------------------------------------------------
 async function enviar({ para, assunto, html, texto }) {
   const transporte = criarTransporte();
 
-  // destino real vs modo teste
-  const destino = MODO_TESTE || para;
+  // lista real de destinatarios (array)
+  const listaReal = normalizarPara(para);
+
+  // rotulo legivel dos destinatarios reais (p/ assunto no modo teste)
+  const rotuloReal = listaReal.join(', ');
+
+  // destino final: no modo teste, tudo vai pro e-mail de teste
+  const destino = MODO_TESTE ? MODO_TESTE : listaReal;
+
   const assuntoFinal = MODO_TESTE
-    ? `[TESTE -> ${para}] ${assunto}`
+    ? `[TESTE -> ${rotuloReal || 'sem-destino'}] ${assunto}`
     : assunto;
 
-  if (!destino) {
+  // sem destinatario real (e sem modo teste) => nao envia
+  if (!MODO_TESTE && listaReal.length === 0) {
     return { ok: false, motivo: 'sem-destino' };
   }
 
@@ -79,7 +100,7 @@ async function enviar({ para, assunto, html, texto }) {
 
   const info = await transporte.sendMail({
     from: REMETENTE,
-    to: destino,
+    to: destino,        // array (varios destinatarios) ou string (modo teste)
     subject: assuntoFinal,
     text: texto,
     html,

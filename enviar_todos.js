@@ -29,7 +29,7 @@ async function executarEnvioDiario(opcoes = {}) {
 
   const clientes = await buscarResumoDiario(opcoes);
   console.log(`Clientes com movimento de ontem: ${clientes.length}`);
-
+  // Número de emails enviados, falhas e clientes sem email ou problemas estruturais 
   let enviados = 0;
   let semEmail = 0;
   let falhas = 0;
