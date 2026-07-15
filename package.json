@@ -1,19 +1,29 @@
 {
-  "name": "itr-emails-diarios",
-  "version": "0.1.0",
-  "description": "Envio diario de emails aos clientes da ITR Engenharia: um email por ordem de servico, com os ensaios/amostras atualizados no dia anterior, lidos do Airtable.",
+  "name": "itr-emails-whatsapp",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Automação diária da ITR Engenharia com dados do Airtable, envio de e-mails e WhatsApp por Ordem de Serviço.",
   "main": "server.js",
+  "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "inspecionar": "node ver_campos.js",
     "enviar": "node enviar_todos.js",
-    "teste": "node enviar_todos.js --ignorar-data"
+    "teste": "node enviar_todos.js --ignorar-data",
+    "preview:whatsapp": "node previsualizar_whatsapp.js",
+    "preview:whatsapp:tudo": "node previsualizar_whatsapp.js --ignorar-data",
+    "preview:whatsapp:json": "node previsualizar_whatsapp.js --json",
+    "preview:whatsapp:tudo:json": "node previsualizar_whatsapp.js --ignorar-data --json",
+    "inspecionar": "node ver_campos.js",
+    "verificar": "node --check airtable.js && node --check email_template.js && node --check enviar_email.js && node --check whatsapp_template.js && node --check enviar_whatsapp.js && node --check enviar_todos.js && node --check previsualizar_whatsapp.js && node --check ver_campos.js && node --check server.js",
+    "test": "npm run verificar"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2",
-    "node-cron": "^3.0.3",
-    "nodemailer": "^6.9.13"
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "node-cron": "^4.6.0",
+    "nodemailer": "^9.0.3"
   }
 }

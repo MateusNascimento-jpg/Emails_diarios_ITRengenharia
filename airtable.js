@@ -1,287 +1,1325 @@
+'use strict';
+
 // ============================================================
-//  airtable.js  -  MODULO CENTRAL DE ACESSO AO AIRTABLE
-// ------------------------------------------------------------
+// airtable.js — LEITURA, FILTRO E AGRUPAMENTO DO AIRTABLE
+// ============================================================
+//
+// REGRAS DE NEGÓCIO:
+//
+// 1. Todos os dados utilizados vêm do Airtable.
+// 2. No funcionamento normal, somente registros atualizados
+//    ontem são processados.
+// 3. Somente os status permitidos entram no envio.
+// 4. Os registros são agrupados desta maneira:
+//
+//    Cliente
+//      └── Ordem de Serviço
+//            ├── Amostra / Ensaio / Status
+//            ├── Amostra / Ensaio / Status
+//            └── Amostra / Ensaio / Status
+//
+// 5. Uma mesma OS mantém todas as suas linhas associadas.
+// 6. Registros sem cliente ou sem OS são ignorados.
+// 7. Linhas realmente duplicadas são removidas.
+// 8. O telefone do WhatsApp também vem do Airtable.
+// 9. Este módulo atende tanto o e-mail quanto o WhatsApp.
+// ============================================================
 
+require('dotenv').config({
+  quiet: true,
+});
 
-require('dotenv').config();
+// ============================================================
+// FUNÇÕES DE CONFIGURAÇÃO
+// ============================================================
 
-const TOKEN = process.env.AIRTABLE_TOKEN;
-const BASE = process.env.AIRTABLE_BASE_ID;
-const VIEW = process.env.AIRTABLE_VIEW_ID; 
+function campoEnv(nome, padrao) {
+  const valor = process.env[nome];
 
-const TABELA_NOVOS_TRABALHOS = process.env.AIRTABLE_TABLE_ID || 'tblJAP4Av9sWm8SmL';
+  if (
+    valor === undefined ||
+    valor === null ||
+    valor === ''
+  ) {
+    return padrao;
+  }
 
-// ------------------------------------------------------------
-// STATUS QUE DISPARAM EMAIL (filtro no codigo)
-// So registros com um destes status entram no email.
-// ------------------------------------------------------------
-const STATUS_PERMITIDOS = [
+  return String(valor).trim();
+}
+
+/**
+ * Preserva espaços no começo ou no final do nome do campo.
+ *
+ * Isso é necessário porque o campo atual:
+ *
+ * Nome_Completo_Ensaios
+ *
+ * possui um espaço real no final no Airtable.
+ */
+function campoEnvExato(nome, padrao) {
+  if (
+    Object.prototype.hasOwnProperty.call(
+      process.env,
+      nome
+    )
+  ) {
+    return String(process.env[nome]);
+  }
+
+  return padrao;
+}
+
+function numeroInteiroPositivo(
+  valor,
+  padrao
+) {
+  const numero = Number.parseInt(
+    String(valor ?? ''),
+    10
+  );
+
+  return (
+    Number.isInteger(numero) &&
+    numero > 0
+  )
+    ? numero
+    : padrao;
+}
+
+// ============================================================
+// CONFIGURAÇÕES GERAIS
+// ============================================================
+
+const TIMEZONE = campoEnv(
+  'APP_TIMEZONE',
+  'America/Sao_Paulo'
+);
+
+const AIRTABLE_TOKEN = campoEnv(
+  'AIRTABLE_TOKEN',
+  ''
+);
+
+const AIRTABLE_BASE_ID = campoEnv(
+  'AIRTABLE_BASE_ID',
+  ''
+);
+
+const AIRTABLE_TABLE_ID = campoEnv(
+  'AIRTABLE_TABLE_ID',
+  'tblJAP4Av9sWm8SmL'
+);
+
+const AIRTABLE_VIEW_ID = campoEnv(
+  'AIRTABLE_VIEW_ID',
+  ''
+);
+
+const AIRTABLE_TIMEOUT_MS =
+  numeroInteiroPositivo(
+    process.env.AIRTABLE_TIMEOUT_MS,
+    20000
+  );
+
+const AIRTABLE_MAX_TENTATIVAS =
+  numeroInteiroPositivo(
+    process.env.AIRTABLE_MAX_TENTATIVAS,
+    3
+  );
+
+// ============================================================
+// STATUS PERMITIDOS
+// ============================================================
+
+const STATUS_PADRAO = [
   'Aguardando Preparação',
   'Enviado ao Cliente',
 ];
 
-// ------------------------------------------------------------
-// NOMES EXATOS DOS CAMPOS (confirmados via ver_campos.js)
-// Centralizados aqui: se um nome mudar no Airtable, muda so aqui.
-// ------------------------------------------------------------
-const CAMPOS = {
-  // chaves de agrupamento (campos de link -> retornam ["rec..."])
-  clienteLink: 'Cliente',
-  osLink: 'Ordem de Serviço',
+const STATUS_PERMITIDOS = (() => {
+  const configurados = String(
+    process.env
+      .AIRTABLE_STATUS_PERMITIDOS || ''
+  )
+    .split('|')
+    .map(item => item.trim())
+    .filter(Boolean);
 
-  // rotulos legiveis (strings) para exibir no email
-  clienteTexto: 'Cliente Texto',
-  osTexto: 'OS Texto',
+  return configurados.length > 0
+    ? configurados
+    : STATUS_PADRAO;
+})();
 
-  // dados do cliente vindos da tabela Clientes via lookup
-  emailCliente: 'Email do Cliente',
-  cnpjCliente: 'CNPJ do Cliente',
+// ============================================================
+// NOMES DOS CAMPOS DO AIRTABLE
+// ============================================================
+//
+// Todos os nomes podem ser substituídos pelo .env.
+//
+// O código não precisará ser alterado se um campo mudar de
+// nome futuramente.
+// ============================================================
 
-  // conteudo de cada linha do email
-  idTrabalho: 'ID Trabalho',
-  nomeTrabalho: 'Nome Trabalho',
-  linkAmostras: 'Link Amostras',
-  linkEnsaios: 'Link Ensaios',
-  nomeCompletoEnsaios: 'Nome_Completo_Ensaios ', // ATENCAO: espaco no fim
-  statusCliente: 'Status Cliente',
-  status: 'Status', // status simples - usado no FILTRO de envio
-  dataConclusao: 'Data de Conclusão do Ensaio',
-  dataEnvioRelatorio: 'Data de Envio do Relatório',
-  dataAtualizacao: 'Data da Última Atualização Update', // usado no FILTRO de "ontem"
-};
+const CAMPOS = Object.freeze({
+  clienteLink: campoEnv(
+    'AIRTABLE_CAMPO_CLIENTE_LINK',
+    'Cliente'
+  ),
 
-// helper: extrai o primeiro record id de um campo de link.
-// campos de link vem como array (ex: ["rec123"]); pega o primeiro.
-function primeiroId(valor) {
-  if (Array.isArray(valor) && valor.length > 0) return valor[0];
-  if (typeof valor === 'string' && valor.startsWith('rec')) return valor;
-  return null;
+  osLink: campoEnv(
+    'AIRTABLE_CAMPO_OS_LINK',
+    'Ordem de Serviço'
+  ),
+
+  clienteTexto: campoEnv(
+    'AIRTABLE_CAMPO_CLIENTE_TEXTO',
+    'Cliente Texto'
+  ),
+
+  osTexto: campoEnv(
+    'AIRTABLE_CAMPO_OS_TEXTO',
+    'OS Texto'
+  ),
+
+  emailCliente: campoEnv(
+    'AIRTABLE_CAMPO_EMAIL_CLIENTE',
+    'Email do Cliente'
+  ),
+
+  cnpjCliente: campoEnv(
+    'AIRTABLE_CAMPO_CNPJ_CLIENTE',
+    'CNPJ do Cliente'
+  ),
+
+  whatsappCliente: campoEnv(
+    'AIRTABLE_CAMPO_WHATSAPP_CLIENTE',
+    'WhatsApp do Cliente'
+  ),
+
+  idTrabalho: campoEnv(
+    'AIRTABLE_CAMPO_ID_TRABALHO',
+    'ID Trabalho'
+  ),
+
+  nomeTrabalho: campoEnv(
+    'AIRTABLE_CAMPO_NOME_TRABALHO',
+    'Nome Trabalho'
+  ),
+
+  amostra: campoEnv(
+    'AIRTABLE_CAMPO_AMOSTRA',
+    'Link Amostras'
+  ),
+
+  ensaioSigla: campoEnv(
+    'AIRTABLE_CAMPO_ENSAIO_SIGLA',
+    'Link Ensaios'
+  ),
+
+  // Existe um espaço real depois de "Ensaios".
+  ensaioNome: campoEnvExato(
+    'AIRTABLE_CAMPO_ENSAIO_NOME',
+    'Nome_Completo_Ensaios '
+  ),
+
+  statusCliente: campoEnv(
+    'AIRTABLE_CAMPO_STATUS_CLIENTE',
+    'Status Cliente'
+  ),
+
+  status: campoEnv(
+    'AIRTABLE_CAMPO_STATUS',
+    'Status'
+  ),
+
+  dataConclusao: campoEnv(
+    'AIRTABLE_CAMPO_DATA_CONCLUSAO',
+    'Data de Conclusão do Ensaio'
+  ),
+
+  dataEnvioRelatorio: campoEnv(
+    'AIRTABLE_CAMPO_DATA_ENVIO_RELATORIO',
+    'Data de Envio do Relatório'
+  ),
+
+  dataAtualizacao: campoEnv(
+    'AIRTABLE_CAMPO_DATA_ATUALIZACAO',
+    'Data da Última Atualização Update'
+  ),
+});
+
+// ============================================================
+// FUNÇÕES AUXILIARES
+// ============================================================
+
+function dormir(ms) {
+  return new Promise(resolve => {
+    setTimeout(resolve, ms);
+  });
 }
 
-// helper: normaliza um valor para texto exibivel (trata array/vazio)
 function texto(valor) {
-  if (valor === undefined || valor === null) return '';
-  if (Array.isArray(valor)) return valor.join(', ');
+  if (
+    valor === undefined ||
+    valor === null
+  ) {
+    return '';
+  }
+
+  if (Array.isArray(valor)) {
+    return valor
+      .flat(Infinity)
+      .map(item =>
+        String(item ?? '').trim()
+      )
+      .filter(Boolean)
+      .join(', ');
+  }
+
   return String(valor).trim();
 }
 
-// ------------------------------------------------------------
-// separarEmails(bruto, contexto)
-//   Converte uma string de e-mails (separados por ; ou ,) em um
-//   array limpo. Perdoa erros de separador e espacos.
-//   Loga (console.warn) o que for descartado por nao ter "@".
-//
-//   Aceita string OU array (lookup do Airtable pode vir como array):
-//   junta tudo primeiro e depois separa por ; ou ,.
-//
-//   contexto = nome do cliente/OS so para identificar no log.
-// ------------------------------------------------------------
-function separarEmails(bruto, contexto = '') {
-  if (!bruto) return [];
+function primeiroId(valor) {
+  if (Array.isArray(valor)) {
+    const encontrado = valor
+      .flat(Infinity)
+      .map(item =>
+        String(item ?? '').trim()
+      )
+      .find(Boolean);
 
-  // lookup pode retornar array; vira string unica antes de separar
-  const comoTexto = Array.isArray(bruto) ? bruto.join(';') : String(bruto);
+    return encontrado || null;
+  }
 
-  const itens = comoTexto
-    .split(/[;,]/)        // aceita ; OU , como separador
-    .map(e => e.trim())   // remove espacos das pontas
-    .filter(Boolean);     // remove vazios ("" de ";;" ou ";" no fim)
+  const normalizado = String(
+    valor ?? ''
+  ).trim();
 
+  return normalizado || null;
+}
+
+function listaSeparada(valor) {
+  if (
+    valor === undefined ||
+    valor === null ||
+    valor === ''
+  ) {
+    return [];
+  }
+
+  const itens = Array.isArray(valor)
+    ? valor.flat(Infinity)
+    : [valor];
+
+  return itens
+    .flatMap(item =>
+      String(item ?? '')
+        .split(/[;,|\n]+/)
+    )
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Busca um campo preservando compatibilidade com o nome antigo
+ * que possui espaço no final.
+ */
+function lerCampo(
+  campos,
+  nomePrincipal,
+  alternativas = []
+) {
+  if (
+    Object.prototype.hasOwnProperty.call(
+      campos,
+      nomePrincipal
+    )
+  ) {
+    return campos[nomePrincipal];
+  }
+
+  for (const alternativa of alternativas) {
+    if (
+      Object.prototype.hasOwnProperty.call(
+        campos,
+        alternativa
+      )
+    ) {
+      return campos[alternativa];
+    }
+  }
+
+  return undefined;
+}
+
+// ============================================================
+// TRATAMENTO DE E-MAILS
+// ============================================================
+
+function separarEmails(
+  valor,
+  contexto = ''
+) {
+  const formatoBasico =
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  const vistos = new Set();
   const validos = [];
   const descartados = [];
 
-  for (const item of itens) {
-    if (item.includes('@')) validos.push(item);
-    else descartados.push(item);
+  for (
+    const item of listaSeparada(valor)
+  ) {
+    const chave =
+      item.toLowerCase();
+
+    if (!formatoBasico.test(item)) {
+      descartados.push(item);
+      continue;
+    }
+
+    if (vistos.has(chave)) {
+      continue;
+    }
+
+    vistos.add(chave);
+    validos.push(item);
   }
 
   if (descartados.length > 0) {
     console.warn(
-      `[separarEmails] ${contexto ? `(${contexto}) ` : ''}` +
-      `Descartado(s) por nao conter "@": ${descartados.join(' | ')}`
+      `[Airtable/e-mail] ` +
+      `${contexto ? `(${contexto}) ` : ''}` +
+      `valor(es) inválido(s) ignorado(s): ` +
+      `${descartados.join(' | ')}`
     );
   }
 
   return validos;
 }
 
-// ------------------------------------------------------------
-// FILTRO DE DATA: verifica se uma data (ISO) caiu ONTEM,
-// no fuso de Brasilia. Usado para enviar de manha o que foi
-// atualizado no dia anterior.
-// ------------------------------------------------------------
-function ehDeOntem(valorData) {
-  // aceita string ISO ou array com ISO dentro
-  let iso = valorData;
-  if (Array.isArray(valorData)) iso = valorData[0];
-  if (!iso) return false;
+// ============================================================
+// TRATAMENTO DE TELEFONES
+// ============================================================
 
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return false;
+function separarTelefones(valor) {
+  const vistos = new Set();
+  const telefones = [];
 
-  // "agora" e "a data" convertidos para a data-calendario de Brasilia
-  const fmt = (dt) => dt.toLocaleDateString('en-CA', {
-    timeZone: 'America/Sao_Paulo',
-  }); // YYYY-MM-DD
+  for (
+    const item of listaSeparada(valor)
+  ) {
+    const somenteDigitos =
+      item.replace(/\D/g, '');
 
-  const ontemBR = fmt(new Date(Date.now() - 24 * 60 * 60 * 1000));
-  const dataBR = fmt(d);
-
-  return dataBR === ontemBR;
-}
-
-// ------------------------------------------------------------
-// buscarRegistrosDaView()
-//   Le TODOS os registros da view, seguindo a paginacao.
-//   Retorna array cru de registros do Airtable.
-// ------------------------------------------------------------
-async function buscarRegistrosDaView() {
-  if (!TOKEN || !BASE) {
-    throw new Error('Faltam AIRTABLE_TOKEN ou AIRTABLE_BASE_ID no .env');
-  }
-
-  const headers = { Authorization: `Bearer ${TOKEN}` };
-  let registros = [];
-  let offset = undefined;
-
-  do {
-    let url = `https://api.airtable.com/v0/${BASE}/${TABELA_NOVOS_TRABALHOS}?pageSize=100`;
-
-    if (VIEW) url += `&view=${encodeURIComponent(VIEW)}`;
-    if (offset) url += `&offset=${offset}`;
-
-    const resp = await fetch(url, { headers });
-
-    if (!resp.ok) {
-      const corpo = await resp.text();
-      throw new Error(`Airtable respondeu ${resp.status}: ${corpo}`);
+    if (
+      !somenteDigitos ||
+      vistos.has(somenteDigitos)
+    ) {
+      continue;
     }
 
-    const dados = await resp.json();
-    registros = registros.concat(dados.records || []);
-    offset = dados.offset; // undefined quando acabou
+    vistos.add(somenteDigitos);
+    telefones.push(item);
+  }
+
+  return telefones;
+}
+
+// ============================================================
+// TRATAMENTO DE DATAS
+// ============================================================
+
+function dataCalendarioNoFuso(data) {
+  const formatador =
+    new Intl.DateTimeFormat(
+      'en-CA',
+      {
+        timeZone: TIMEZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }
+    );
+
+  const partes = Object.fromEntries(
+    formatador
+      .formatToParts(data)
+      .filter(
+        parte =>
+          parte.type !== 'literal'
+      )
+      .map(parte => [
+        parte.type,
+        parte.value,
+      ])
+  );
+
+  return (
+    `${partes.year}-` +
+    `${partes.month}-` +
+    `${partes.day}`
+  );
+}
+
+function subtrairDiasCalendario(
+  dataYmd,
+  quantidade
+) {
+  const correspondencia =
+    /^(\d{4})-(\d{2})-(\d{2})$/.exec(
+      dataYmd
+    );
+
+  if (!correspondencia) {
+    return '';
+  }
+
+  const [, ano, mes, dia] =
+    correspondencia;
+
+  const dataUtc = new Date(
+    Date.UTC(
+      Number(ano),
+      Number(mes) - 1,
+      Number(dia)
+    )
+  );
+
+  dataUtc.setUTCDate(
+    dataUtc.getUTCDate() -
+      quantidade
+  );
+
+  return dataUtc
+    .toISOString()
+    .slice(0, 10);
+}
+
+function dataCalendarioDoValor(valor) {
+  const bruto = Array.isArray(valor)
+    ? String(valor[0] ?? '').trim()
+    : String(valor ?? '').trim();
+
+  if (!bruto) {
+    return '';
+  }
+
+  // Quando o Airtable entrega apenas YYYY-MM-DD,
+  // o valor é preservado diretamente.
+  //
+  // Isso evita que meia-noite UTC seja convertida
+  // para o dia anterior no fuso de Brasília.
+  if (
+    /^\d{4}-\d{2}-\d{2}$/.test(bruto)
+  ) {
+    return bruto;
+  }
+
+  const data = new Date(bruto);
+
+  if (
+    Number.isNaN(data.getTime())
+  ) {
+    return '';
+  }
+
+  return dataCalendarioNoFuso(data);
+}
+
+function ehDeOntem(
+  valorData,
+  agora = new Date()
+) {
+  const hoje =
+    dataCalendarioNoFuso(agora);
+
+  const ontem =
+    subtrairDiasCalendario(
+      hoje,
+      1
+    );
+
+  const dataRegistro =
+    dataCalendarioDoValor(
+      valorData
+    );
+
+  return Boolean(
+    dataRegistro &&
+    dataRegistro === ontem
+  );
+}
+
+// ============================================================
+// CONSULTA AO AIRTABLE
+// ============================================================
+
+function erroPodeSerTemporario(
+  statusHttp
+) {
+  return (
+    statusHttp === 408 ||
+    statusHttp === 429 ||
+    statusHttp >= 500
+  );
+}
+
+async function requisitarAirtable(
+  url,
+  headers
+) {
+  let ultimoErro = null;
+
+  for (
+    let tentativa = 1;
+    tentativa <=
+      AIRTABLE_MAX_TENTATIVAS;
+    tentativa += 1
+  ) {
+    const controlador =
+      new AbortController();
+
+    const temporizador =
+      setTimeout(
+        () => controlador.abort(),
+        AIRTABLE_TIMEOUT_MS
+      );
+
+    try {
+      const resposta = await fetch(
+        url,
+        {
+          method: 'GET',
+          headers,
+          signal:
+            controlador.signal,
+        }
+      );
+
+      if (resposta.ok) {
+        return resposta;
+      }
+
+      const corpo =
+        await resposta.text();
+
+      ultimoErro = new Error(
+        `Airtable respondeu HTTP ` +
+        `${resposta.status}: ` +
+        `${corpo.slice(0, 1000)}`
+      );
+
+      const podeRepetir =
+        erroPodeSerTemporario(
+          resposta.status
+        );
+
+      if (
+        !podeRepetir ||
+        tentativa ===
+          AIRTABLE_MAX_TENTATIVAS
+      ) {
+        throw ultimoErro;
+      }
+
+      const retryAfter = Number(
+        resposta.headers.get(
+          'retry-after'
+        )
+      );
+
+      const espera =
+        (
+          Number.isFinite(
+            retryAfter
+          ) &&
+          retryAfter > 0
+        )
+          ? retryAfter * 1000
+          : 800 * tentativa;
+
+      console.warn(
+        `[Airtable] HTTP ` +
+        `${resposta.status}. ` +
+        `Nova tentativa em ` +
+        `${espera} ms ` +
+        `(${tentativa}/` +
+        `${AIRTABLE_MAX_TENTATIVAS}).`
+      );
+
+      await dormir(espera);
+    } catch (erro) {
+      ultimoErro =
+        erro?.name === 'AbortError'
+          ? new Error(
+              `A consulta ao Airtable ` +
+              `excedeu ` +
+              `${AIRTABLE_TIMEOUT_MS} ms.`
+            )
+          : erro;
+
+      if (
+        tentativa ===
+        AIRTABLE_MAX_TENTATIVAS
+      ) {
+        throw ultimoErro;
+      }
+
+      console.warn(
+        `[Airtable] Falha na ` +
+        `tentativa ${tentativa}: ` +
+        `${ultimoErro.message}. ` +
+        `Tentando novamente.`
+      );
+
+      await dormir(
+        800 * tentativa
+      );
+    } finally {
+      clearTimeout(
+        temporizador
+      );
+    }
+  }
+
+  throw (
+    ultimoErro ||
+    new Error(
+      'Falha desconhecida ao consultar o Airtable.'
+    )
+  );
+}
+
+async function buscarRegistrosDaView() {
+  if (
+    !AIRTABLE_TOKEN ||
+    !AIRTABLE_BASE_ID ||
+    !AIRTABLE_TABLE_ID
+  ) {
+    throw new Error(
+      'Preencha AIRTABLE_TOKEN, ' +
+      'AIRTABLE_BASE_ID e ' +
+      'AIRTABLE_TABLE_ID no ambiente.'
+    );
+  }
+
+  if (
+    typeof fetch !== 'function'
+  ) {
+    throw new Error(
+      'Este projeto exige Node.js 20 ou superior.'
+    );
+  }
+
+  const headers = {
+    Authorization:
+      `Bearer ${AIRTABLE_TOKEN}`,
+
+    Accept:
+      'application/json',
+  };
+
+  const registros = [];
+  let offset = '';
+
+  do {
+    const parametros =
+      new URLSearchParams({
+        pageSize: '100',
+      });
+
+    if (AIRTABLE_VIEW_ID) {
+      parametros.set(
+        'view',
+        AIRTABLE_VIEW_ID
+      );
+    }
+
+    if (offset) {
+      parametros.set(
+        'offset',
+        offset
+      );
+    }
+
+    const url =
+      `https://api.airtable.com/v0/` +
+      `${encodeURIComponent(
+        AIRTABLE_BASE_ID
+      )}/` +
+      `${encodeURIComponent(
+        AIRTABLE_TABLE_ID
+      )}?` +
+      parametros.toString();
+
+    const resposta =
+      await requisitarAirtable(
+        url,
+        headers
+      );
+
+    const dados =
+      await resposta.json();
+
+    if (
+      Array.isArray(dados.records)
+    ) {
+      registros.push(
+        ...dados.records
+      );
+    }
+
+    offset = String(
+      dados.offset || ''
+    );
   } while (offset);
 
   return registros;
 }
 
-// ------------------------------------------------------------
-// agruparPorClienteEOS(registros)
-//   Transforma a lista crua em:
-//   [
-//     {
-//       clienteId,
-//       clienteNome,
-//       emails,        // <-- agora ARRAY de e-mails ja limpos
-//       cnpj,
-//       ordens: [
-//         { osId, osNome, linhas: [ {..dados do trabalho..}, ... ] },
-//         ...
-//       ]
-//     },
-//     ...
-//   ]
-//   Cada "ordem" vira 1 email (um email por OS de cada cliente).
-// ------------------------------------------------------------
-function agruparPorClienteEOS(registros, opcoes = {}) {
-  const IGNORAR_DATA = opcoes.ignorarData === true;
-  const clientes = new Map(); // clienteId -> objeto cliente
+// ============================================================
+// CHAVE DE DEDUPLICAÇÃO
+// ============================================================
 
-  for (const rec of registros) {
-    const f = rec.fields || {};
+function chaveDaLinha(linha) {
+  const partes = [
+    linha.idTrabalho,
+    linha.amostra,
+    linha.ensaioNome ||
+      linha.ensaioSigla,
+    linha.status,
+  ].map(item =>
+    String(item || '')
+      .trim()
+      .toLowerCase()
+  );
 
-    // FILTRO 1: so processa registros com status permitido (campo 'Status' simples)
-    const statusReg = texto(f[CAMPOS.status]);
-    if (!STATUS_PERMITIDOS.includes(statusReg)) {
-      continue; // ignora qualquer outro status
-    }
+  const chave =
+    partes.join('|');
 
-    // FILTRO 2: so registros atualizados ONTEM (envio matinal do dia anterior).
-    // Pode ser desligado passando { ignorarData: true } — ver buscarResumoDiario.
-    if (!IGNORAR_DATA && !ehDeOntem(f[CAMPOS.dataAtualizacao])) {
+  if (
+    chave.replace(/\|/g, '')
+  ) {
+    return chave;
+  }
+
+  return (
+    `record:` +
+    String(
+      linha.recordId || ''
+    )
+  );
+}
+
+// ============================================================
+// AGRUPAMENTO
+// CLIENTE → ORDEM DE SERVIÇO → LINHAS
+// ============================================================
+
+function agruparPorClienteEOS(
+  registros,
+  opcoes = {}
+) {
+  const ignorarData =
+    opcoes.ignorarData === true;
+
+  const agora =
+    opcoes.agora instanceof Date
+      ? opcoes.agora
+      : new Date();
+
+  const clientes = new Map();
+
+  const listaRegistros =
+    Array.isArray(registros)
+      ? registros
+      : [];
+
+  for (
+    const registro of listaRegistros
+  ) {
+    const campos =
+      registro.fields || {};
+
+    const status =
+      texto(
+        lerCampo(
+          campos,
+          CAMPOS.status
+        )
+      );
+
+    // Somente os status configurados
+    // entram no processamento.
+    if (
+      !STATUS_PERMITIDOS.includes(
+        status
+      )
+    ) {
       continue;
     }
 
-    const clienteId = primeiroId(f[CAMPOS.clienteLink]) || '(sem-cliente)';
-    const osId = primeiroId(f[CAMPOS.osLink]) || '(sem-os)';
+    // Normalmente, somente atualizações
+    // ocorridas ontem são processadas.
+    if (
+      !ignorarData &&
+      !ehDeOntem(
+        lerCampo(
+          campos,
+          CAMPOS.dataAtualizacao
+        ),
+        agora
+      )
+    ) {
+      continue;
+    }
 
-    const nomeClienteRegistro = texto(f[CAMPOS.clienteTexto]) || clienteId;
+    const clienteId =
+      primeiroId(
+        lerCampo(
+          campos,
+          CAMPOS.clienteLink
+        )
+      );
 
-    // garante o cliente no mapa
-    if (!clientes.has(clienteId)) {
-      clientes.set(clienteId, {
+    const osId =
+      primeiroId(
+        lerCampo(
+          campos,
+          CAMPOS.osLink
+        )
+      );
+
+    // Não cria agrupamentos genéricos como
+    // "(sem cliente)" ou "(sem OS)".
+    //
+    // Isso evita misturar registros diferentes.
+    if (
+      !clienteId ||
+      !osId
+    ) {
+      const ausentes = [
+        !clienteId
+          ? 'Cliente'
+          : '',
+
+        !osId
+          ? 'Ordem de Serviço'
+          : '',
+      ].filter(Boolean);
+
+      console.warn(
+        `[Airtable] Registro ` +
+        `${registro.id || '(sem ID)'} ` +
+        `ignorado: ` +
+        `${ausentes.join(' e ')} ` +
+        `ausente(s).`
+      );
+
+      continue;
+    }
+
+    const clienteNome =
+      texto(
+        lerCampo(
+          campos,
+          CAMPOS.clienteTexto
+        )
+      ) || clienteId;
+
+    // --------------------------------------------------------
+    // CLIENTE
+    // --------------------------------------------------------
+
+    if (
+      !clientes.has(clienteId)
+    ) {
+      clientes.set(
         clienteId,
-        clienteNome: nomeClienteRegistro,
-        // separa ja na entrada; array de e-mails limpos (pode vir vazio)
-        emails: separarEmails(f[CAMPOS.emailCliente], nomeClienteRegistro),
-        cnpj: texto(f[CAMPOS.cnpjCliente]),   // lookup array -> string
-        ordens: new Map(), // osId -> objeto ordem
-      });
+        {
+          clienteId,
+          clienteNome,
+
+          emails:
+            new Map(),
+
+          cnpjs:
+            new Map(),
+
+          telefones:
+            new Map(),
+
+          ordens:
+            new Map(),
+        }
+      );
     }
 
-    const cliente = clientes.get(clienteId);
+    const cliente =
+      clientes.get(clienteId);
 
-    // se os e-mails so aparecerem em alguma linha posterior, captura assim que surgir
-    if (cliente.emails.length === 0) {
-      const possiveis = separarEmails(f[CAMPOS.emailCliente], nomeClienteRegistro);
-      if (possiveis.length > 0) cliente.emails = possiveis;
+    if (
+      (
+        !cliente.clienteNome ||
+        cliente.clienteNome ===
+          cliente.clienteId
+      ) &&
+      clienteNome
+    ) {
+      cliente.clienteNome =
+        clienteNome;
     }
 
-    // se o CNPJ so aparecer em alguma linha posterior, captura assim que surgir
-    if (!cliente.cnpj) {
-      const possivelCnpj = texto(f[CAMPOS.cnpjCliente]);
-      if (possivelCnpj) cliente.cnpj = possivelCnpj;
+    // --------------------------------------------------------
+    // E-MAILS
+    // --------------------------------------------------------
+
+    const emailsRegistro =
+      separarEmails(
+        lerCampo(
+          campos,
+          CAMPOS.emailCliente
+        ),
+        cliente.clienteNome
+      );
+
+    for (
+      const email of emailsRegistro
+    ) {
+      cliente.emails.set(
+        email.toLowerCase(),
+        email
+      );
     }
 
-    // garante a OS dentro do cliente
-    if (!cliente.ordens.has(osId)) {
-      cliente.ordens.set(osId, {
+    // --------------------------------------------------------
+    // CNPJ
+    // --------------------------------------------------------
+
+    const cnpj =
+      texto(
+        lerCampo(
+          campos,
+          CAMPOS.cnpjCliente
+        )
+      );
+
+    if (cnpj) {
+      const chaveCnpj =
+        cnpj.replace(/\D/g, '') ||
+        cnpj;
+
+      cliente.cnpjs.set(
+        chaveCnpj,
+        cnpj
+      );
+    }
+
+    // --------------------------------------------------------
+    // WHATSAPP
+    // --------------------------------------------------------
+
+    const telefonesRegistro =
+      separarTelefones(
+        lerCampo(
+          campos,
+          CAMPOS.whatsappCliente
+        )
+      );
+
+    for (
+      const telefone of
+      telefonesRegistro
+    ) {
+      cliente.telefones.set(
+        telefone.replace(/\D/g, ''),
+        telefone
+      );
+    }
+
+    // --------------------------------------------------------
+    // ORDEM DE SERVIÇO
+    // --------------------------------------------------------
+
+    if (
+      !cliente.ordens.has(osId)
+    ) {
+      cliente.ordens.set(
         osId,
-        osNome: texto(f[CAMPOS.osTexto]) || osId,
-        linhas: [],
-      });
+        {
+          osId,
+
+          osNome:
+            texto(
+              lerCampo(
+                campos,
+                CAMPOS.osTexto
+              )
+            ) || osId,
+
+          linhas:
+            new Map(),
+        }
+      );
     }
 
-    const ordem = cliente.ordens.get(osId);
+    const ordem =
+      cliente.ordens.get(osId);
 
-    // monta a linha (uma linha = um trabalho/ensaio dentro da OS)
-    ordem.linhas.push({
-      idTrabalho: texto(f[CAMPOS.idTrabalho]),
-      nomeTrabalho: texto(f[CAMPOS.nomeTrabalho]),
-      amostra: texto(f[CAMPOS.linkAmostras]),
-      ensaioSigla: texto(f[CAMPOS.linkEnsaios]),
-      ensaioNome: texto(f[CAMPOS.nomeCompletoEnsaios]),
-      status: texto(f[CAMPOS.status]), // Status simples -> de-para no template
-      dataConclusao: texto(f[CAMPOS.dataConclusao]),
-      dataEnvio: texto(f[CAMPOS.dataEnvioRelatorio]),
-    });
+    const osNomeAtual =
+      texto(
+        lerCampo(
+          campos,
+          CAMPOS.osTexto
+        )
+      );
+
+    if (
+      (
+        !ordem.osNome ||
+        ordem.osNome ===
+          ordem.osId
+      ) &&
+      osNomeAtual
+    ) {
+      ordem.osNome =
+        osNomeAtual;
+    }
+
+    // --------------------------------------------------------
+    // LINHA DA OS
+    // --------------------------------------------------------
+
+    const linha = {
+      recordId:
+        String(
+          registro.id || ''
+        ),
+
+      idTrabalho:
+        texto(
+          lerCampo(
+            campos,
+            CAMPOS.idTrabalho
+          )
+        ),
+
+      nomeTrabalho:
+        texto(
+          lerCampo(
+            campos,
+            CAMPOS.nomeTrabalho
+          )
+        ),
+
+      amostra:
+        texto(
+          lerCampo(
+            campos,
+            CAMPOS.amostra
+          )
+        ),
+
+      ensaioSigla:
+        texto(
+          lerCampo(
+            campos,
+            CAMPOS.ensaioSigla
+          )
+        ),
+
+      ensaioNome:
+        texto(
+          lerCampo(
+            campos,
+            CAMPOS.ensaioNome,
+            [
+              'Nome_Completo_Ensaios ',
+              'Nome_Completo_Ensaios',
+            ]
+          )
+        ),
+
+      statusCliente:
+        texto(
+          lerCampo(
+            campos,
+            CAMPOS.statusCliente
+          )
+        ),
+
+      status,
+
+      dataConclusao:
+        texto(
+          lerCampo(
+            campos,
+            CAMPOS.dataConclusao
+          )
+        ),
+
+      dataEnvio:
+        texto(
+          lerCampo(
+            campos,
+            CAMPOS
+              .dataEnvioRelatorio
+          )
+        ),
+
+      dataAtualizacao:
+        texto(
+          lerCampo(
+            campos,
+            CAMPOS.dataAtualizacao
+          )
+        ),
+    };
+
+    const chaveLinha =
+      chaveDaLinha(linha);
+
+    // Uma linha somente é removida quando o conjunto:
+    //
+    // ID do trabalho
+    // + amostra
+    // + ensaio
+    // + status
+    //
+    // for realmente igual.
+    if (
+      !ordem.linhas.has(
+        chaveLinha
+      )
+    ) {
+      ordem.linhas.set(
+        chaveLinha,
+        linha
+      );
+    }
   }
 
-  return [...clientes.values()].map(c => ({
-    clienteId: c.clienteId,
-    clienteNome: c.clienteNome,
-    emails: c.emails || [],       // <-- array (novo)
-    email: (c.emails || []).join(', '), // <-- compat: string legivel, se algo antigo ainda ler .email
-    cnpj: c.cnpj || '',
-    ordens: [...c.ordens.values()],
-  }));
+  // ==========================================================
+  // CONVERSÃO DOS MAPS PARA OBJETOS E ARRAYS
+  // ==========================================================
+
+  return [
+    ...clientes.values(),
+  ].map(cliente => {
+    const emails = [
+      ...cliente.emails.values(),
+    ];
+
+    const cnpjs = [
+      ...cliente.cnpjs.values(),
+    ];
+
+    const telefones = [
+      ...cliente.telefones.values(),
+    ];
+
+    if (cnpjs.length > 1) {
+      console.warn(
+        `[Airtable] ` +
+        `${cliente.clienteNome}: ` +
+        `mais de um CNPJ encontrado ` +
+        `(${cnpjs.join(' | ')}). ` +
+        `O primeiro será utilizado.`
+      );
+    }
+
+    if (telefones.length > 1) {
+      console.warn(
+        `[Airtable/WhatsApp] ` +
+        `${cliente.clienteNome}: ` +
+        `mais de um telefone encontrado ` +
+        `(${telefones.join(' | ')}). ` +
+        `O envio será bloqueado até existir ` +
+        `apenas um número para o cliente.`
+      );
+    }
+
+    return {
+      clienteId:
+        cliente.clienteId,
+
+      clienteNome:
+        cliente.clienteNome,
+
+      emails,
+
+      // Compatibilidade com o fluxo atual de e-mail.
+      email:
+        emails.join(', '),
+
+      cnpj:
+        cnpjs[0] || '',
+
+      cnpjsEncontrados:
+        cnpjs,
+
+      // Um telefone único permite o envio.
+      whatsapp:
+        telefones.length === 1
+          ? telefones[0]
+          : '',
+
+      whatsappAmbiguo:
+        telefones.length > 1,
+
+      whatsappsEncontrados:
+        telefones,
+
+      ordens: [
+        ...cliente.ordens.values(),
+      ].map(ordem => ({
+        osId:
+          ordem.osId,
+
+        osNome:
+          ordem.osNome,
+
+        linhas: [
+          ...ordem.linhas.values(),
+        ],
+      })),
+    };
+  });
 }
 
-// ------------------------------------------------------------
-// buscarResumoDiario()
-//   Funcao de alto nivel: le a view e ja devolve agrupado.
-//   E' isso que o resto da aplicacao vai chamar.
-// ------------------------------------------------------------
-async function buscarResumoDiario(opcoes = {}) {
-  const registros = await buscarRegistrosDaView();
-  const agrupado = agruparPorClienteEOS(registros, opcoes);
-  return agrupado;
+// ============================================================
+// FUNÇÃO PRINCIPAL
+// ============================================================
+
+async function buscarResumoDiario(
+  opcoes = {}
+) {
+  const registros =
+    await buscarRegistrosDaView();
+
+  return agruparPorClienteEOS(
+    registros,
+    opcoes
+  );
 }
+
+// ============================================================
+// EXPORTAÇÕES
+// ============================================================
 
 module.exports = {
   buscarResumoDiario,
   buscarRegistrosDaView,
   agruparPorClienteEOS,
-  separarEmails, // exportado caso queira reusar/testar isoladamente
+
+  separarEmails,
+  separarTelefones,
+
+  dataCalendarioDoValor,
+  ehDeOntem,
+
   CAMPOS,
+  STATUS_PERMITIDOS,
+  TIMEZONE,
 };
