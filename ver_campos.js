@@ -3,30 +3,6 @@
 // ============================================================
 // ver_campos.js — INSPEÇÃO SEGURA DOS CAMPOS DO AIRTABLE
 // ============================================================
-//
-// Objetivos:
-//
-// 1. Consultar os registros reais do Airtable.
-// 2. Identificar todos os nomes de campos retornados.
-// 3. Verificar os campos exigidos pelo projeto.
-// 4. Detectar nomes com espaços no começo ou no final.
-// 5. Confirmar se o campo de WhatsApp existe.
-// 6. Não exibir tokens, senhas ou dados completos dos clientes.
-// 7. Não enviar e-mail.
-// 8. Não realizar chamadas para a Meta.
-//
-// Comando:
-//
-// npm run inspecionar
-//
-// Saída JSON:
-//
-// node ver_campos.js --json
-//
-// Exibir uma amostra sanitizada dos tipos:
-//
-// node ver_campos.js --amostra
-// ============================================================
 
 require('dotenv').config({
   quiet: true,

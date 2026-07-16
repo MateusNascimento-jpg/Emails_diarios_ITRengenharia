@@ -3,27 +3,7 @@
 // ============================================================
 // airtable.js — LEITURA, FILTRO E AGRUPAMENTO DO AIRTABLE
 // ============================================================
-//
-// REGRAS DE NEGÓCIO:
-//
-// 1. Todos os dados utilizados vêm do Airtable.
-// 2. No funcionamento normal, somente registros atualizados
-//    ontem são processados.
-// 3. Somente os status permitidos entram no envio.
-// 4. Os registros são agrupados desta maneira:
-//
-//    Cliente
-//      └── Ordem de Serviço
-//            ├── Amostra / Ensaio / Status
-//            ├── Amostra / Ensaio / Status
-//            └── Amostra / Ensaio / Status
-//
-// 5. Uma mesma OS mantém todas as suas linhas associadas.
-// 6. Registros sem cliente ou sem OS são ignorados.
-// 7. Linhas realmente duplicadas são removidas.
-// 8. O telefone do WhatsApp também vem do Airtable.
-// 9. Este módulo atende tanto o e-mail quanto o WhatsApp.
-// ============================================================
+
 
 require('dotenv').config({
   quiet: true,

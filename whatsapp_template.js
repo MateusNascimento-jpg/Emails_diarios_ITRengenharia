@@ -3,20 +3,6 @@
 // ============================================================
 // whatsapp_template.js — MONTAGEM FINAL DO TEMPLATE DA META
 // ============================================================
-// Responsabilidades:
-//
-// 1. Receber os dados agrupados pelo airtable.js.
-// 2. Manter a regra definitiva: UMA mensagem por OS.
-// 3. Consolidar todas as amostras, ensaios e status da OS.
-// 4. Criar o payload completo da WhatsApp Cloud API.
-// 5. Permitir configurar o template somente pelo .env.
-//
-// Quando o número e o template forem configurados na Meta,
-// este arquivo não precisará ser alterado.
-//
-// Os identificadores, nomes dos parâmetros, cabeçalho,
-// idioma e botões dinâmicos serão lidos do ambiente.
-// ============================================================
 
 require('dotenv').config();
 

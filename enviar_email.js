@@ -97,7 +97,7 @@ async function enviar({ para, assunto, html, texto }) {
       cid: 'logoITR', // deve bater com o src="cid:logoITR" do template
     });
   }
-
+// envia o email automaticamente via SMTP (nodemailer) 
   const info = await transporte.sendMail({
     from: REMETENTE,
     to: destino,        // array (varios destinatarios) ou string (modo teste)

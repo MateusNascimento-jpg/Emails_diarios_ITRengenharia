@@ -3,31 +3,6 @@
 // ============================================================
 // previsualizar_whatsapp.js
 // ============================================================
-// Objetivo:
-//
-// - consultar os dados reais do Airtable;
-// - aplicar os mesmos filtros de status e data;
-// - respeitar o agrupamento:
-//     Cliente → Ordem de Serviço → Amostras/Ensaios/Status;
-// - mostrar uma única mensagem consolidada por OS;
-// - não enviar e-mail;
-// - não chamar a API da Meta;
-// - funcionar mesmo antes de o chip e o template existirem.
-//
-// Comandos:
-//
-// Visualizar somente as atualizações de ontem:
-// npm run preview:whatsapp
-//
-// Ignorar a data e mostrar todos os registros com status válido:
-// npm run preview:whatsapp:tudo
-//
-// Saída em JSON:
-// node previsualizar_whatsapp.js --json
-//
-// Ignorar data e gerar JSON:
-// node previsualizar_whatsapp.js --ignorar-data --json
-// ============================================================
 
 require('dotenv').config();
 
@@ -49,7 +24,7 @@ const {
 const ARGUMENTOS = new Set(
   process.argv.slice(2)
 );
-
+// Não filtrar por data por enquanto
 const IGNORAR_DATA =
   ARGUMENTOS.has('--ignorar-data');
 
@@ -315,7 +290,7 @@ function gerarRelatorio(
     mensagens.filter(
       item => !item.ok
     );
-
+    
   return {
     geradoEm:
       new Date().toISOString(),

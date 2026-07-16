@@ -1,9 +1,6 @@
 // ============================================================
-//  email_template.js  -  MONTAGEM DO EMAIL (uma OS = um email)
+//  email_template.js  -  MONTAGEM DO EMAIL (uma OS = um email) - Montagem de acordo com o Banco da Empresa
 // ------------------------------------------------------------
-//  Topo: logo + saudacao + texto. Depois: tabela de 3 colunas
-//  (Amostra, Ensaios, Status). Logo inline via cid:logoITR.
-// ============================================================
 
 function esc(s) {
   return String(s || '')
