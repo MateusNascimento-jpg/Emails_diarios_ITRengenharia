@@ -245,9 +245,18 @@ function itensDaOS(ordem) {
       '-'
     );
 
+    const ensaioNome = limparTexto(
+      linha?.ensaioNome
+    );
+
+    const ensaioSigla = limparTexto(
+      linha?.ensaioSigla
+    );
+
+    // Nome completo para o formato normal.
+    // A sigla continuará disponível para formatos compactos.
     const ensaio = limparTexto(
-      linha?.ensaioNome ||
-        linha?.ensaioSigla,
+      ensaioNome || ensaioSigla,
       '-'
     );
 
@@ -258,11 +267,7 @@ function itensDaOS(ordem) {
       '-'
     );
 
-    // Remove repetições somente quando o conjunto completo
-    // Amostra + Ensaio + Status for igual.
-    //
-    // Uma mesma amostra pode continuar aparecendo quando
-    // possuir outro ensaio ou outro status.
+    // Remove somente repetições realmente idênticas.
     const chave = [
       amostra,
       ensaio,
@@ -279,7 +284,14 @@ function itensDaOS(ordem) {
 
     itens.push({
       amostra,
+
+      // Compatibilidade com o restante do sistema.
       ensaio,
+
+      // Dados disponíveis separadamente.
+      ensaioNome,
+      ensaioSigla,
+
       status,
 
       recordId: limparTexto(
@@ -310,14 +322,166 @@ function detalhesEmBlocos(itens) {
 }
 
 function detalhesCompactos(itens) {
-  return itens
-    .map((item, indice) => (
-      `${indice + 1}. ` +
-      `${item.amostra} | ` +
-      `${item.ensaio} | ` +
-      `${item.status}`
+  const porAmostra = new Map();
+  const porEnsaio = new Map();
+
+  function compactarPrefixoComum(valores) {
+    const lista = [...valores]
+      .map(valor =>
+        limparTexto(valor, '-')
+      );
+
+    if (lista.length < 2) {
+      return lista.join('; ');
+    }
+
+    let prefixo = lista[0];
+
+    for (const valor of lista.slice(1)) {
+      while (
+        prefixo &&
+        !valor.startsWith(prefixo)
+      ) {
+        prefixo = prefixo.slice(0, -1);
+      }
+    }
+
+    // Usa somente prefixos completos terminados em espaço.
+    // Exemplo:
+    // "Registro 84", "Registro 85"
+    // vira:
+    // "Registro 84; 85"
+    const ultimoEspaco =
+      prefixo.lastIndexOf(' ');
+
+    if (ultimoEspaco < 3) {
+      return lista.join('; ');
+    }
+
+    prefixo = prefixo.slice(
+      0,
+      ultimoEspaco + 1
+    );
+
+    const rotulo = prefixo.trim();
+
+    const sufixos = lista.map(valor =>
+      valor
+        .slice(prefixo.length)
+        .trim()
+    );
+
+    if (
+      !rotulo ||
+      sufixos.some(item => !item)
+    ) {
+      return lista.join('; ');
+    }
+
+    const original =
+      lista.join('; ');
+
+    const compactado =
+      `${rotulo} ${sufixos.join('; ')}`;
+
+    return compactado.length < original.length
+      ? compactado
+      : original;
+  }
+
+  for (const item of itens) {
+    const ensaioCurto = limparTexto(
+      item.ensaioSigla ||
+        item.ensaioNome ||
+        item.ensaio,
+      '-'
+    );
+
+    // Amostra + Status → Ensaios
+    const chaveAmostra = [
+      item.amostra,
+      item.status,
+    ].join('\u0000');
+
+    if (!porAmostra.has(chaveAmostra)) {
+      porAmostra.set(chaveAmostra, {
+        amostra: item.amostra,
+        status: item.status,
+        ensaios: new Set(),
+      });
+    }
+
+    porAmostra
+      .get(chaveAmostra)
+      .ensaios
+      .add(ensaioCurto);
+
+    // Ensaio + Status → Amostras
+    const chaveEnsaio = [
+      ensaioCurto,
+      item.status,
+    ].join('\u0000');
+
+    if (!porEnsaio.has(chaveEnsaio)) {
+      porEnsaio.set(chaveEnsaio, {
+        ensaio: ensaioCurto,
+        status: item.status,
+        amostras: new Set(),
+      });
+    }
+
+    porEnsaio
+      .get(chaveEnsaio)
+      .amostras
+      .add(item.amostra);
+  }
+
+  const textoPorAmostra = [
+    ...porAmostra.values(),
+  ]
+    .map(grupo => (
+      `${grupo.amostra}: ` +
+      `${[...grupo.ensaios].join('; ')} ` +
+      `(${grupo.status})`
     ))
     .join('\n');
+
+  const secoesPorStatus = new Map();
+
+  for (const grupo of porEnsaio.values()) {
+    if (!secoesPorStatus.has(grupo.status)) {
+      secoesPorStatus.set(
+        grupo.status,
+        []
+      );
+    }
+
+    const amostrasCompactadas =
+      compactarPrefixoComum(
+        grupo.amostras
+      );
+
+    secoesPorStatus
+      .get(grupo.status)
+      .push(
+        `${grupo.ensaio}: ` +
+        `${amostrasCompactadas}`
+      );
+  }
+
+  const textoPorEnsaio = [
+    ...secoesPorStatus.entries(),
+  ]
+    .map(([status, linhas]) => (
+      `Status: ${status}\n` +
+      linhas.join('\n')
+    ))
+    .join('\n\n');
+
+  return textoPorEnsaio.length <
+    textoPorAmostra.length
+    ? textoPorEnsaio
+    : textoPorAmostra;
 }
 
 function escolherDetalhes(itens) {
