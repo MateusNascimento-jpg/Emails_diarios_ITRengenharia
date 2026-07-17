@@ -1100,6 +1100,29 @@ app.get(
   }
 );
 
+// Logo com fundo escuro usada no cabeçalho do WhatsApp.
+app.get(
+  '/assets/logo-whatsapp.jpeg',
+  (req, res, next) => {
+    res.setHeader(
+      'Cache-Control',
+      'public, max-age=86400'
+    );
+
+    res.sendFile(
+      'assets/logo-whatsapp.jpeg',
+      {
+        root: __dirname,
+      },
+      erro => {
+        if (erro) {
+          next(erro);
+        }
+      }
+    );
+  }
+);
+
 
 app.get('/', (req, res) => {
   res.status(200).json({
