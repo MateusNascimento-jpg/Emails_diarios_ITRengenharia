@@ -1074,6 +1074,32 @@ async function executarControlado({
 // ============================================================
 // SAÚDE E STATUS
 // ============================================================
+// Logo pública usada no cabeçalho do modelo do WhatsApp.
+app.get(
+  '/assets/logo.png',
+
+  (req, res, next) => {
+    res.setHeader(
+      'Cache-Control',
+      'public, max-age=86400'
+    );
+
+    res.sendFile(
+      'assets/logo.png',
+
+      {
+        root: __dirname,
+      },
+
+      erro => {
+        if (erro) {
+          next(erro);
+        }
+      }
+    );
+  }
+);
+
 
 app.get('/', (req, res) => {
   res.status(200).json({
