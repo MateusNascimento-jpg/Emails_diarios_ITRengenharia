@@ -80,7 +80,7 @@ const CONFIG = Object.freeze({
   // Status:
   //
   // compacto:
-  // 1. Amostra | Ensaio | Status
+  // agrupamento resumido preservando as associações.
   detailsFormat: textoEnv(
     'WHATSAPP_FORMATO_DETALHES',
     'auto'
@@ -821,10 +821,19 @@ function montarParametrosDoCorpo(
       const parametro = {
         type: 'text',
 
+        // A Meta rejeita determinados valores de parâmetros
+        // quando eles contêm quebras de linha ou tabulações.
+        //
+        // Nenhum item é removido: as quebras são convertidas
+        // em separadores textuais seguros.
         text: resolverValor(
           mapeamento.source,
           contexto
-        ),
+        )
+          .replace(/\r\n|\r|\n/g, ' | ')
+          .replace(/\t/g, ' ')
+          .replace(/ {2,}/g, ' ')
+          .trim(),
       };
 
       if (modo === 'named') {
