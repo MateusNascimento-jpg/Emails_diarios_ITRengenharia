@@ -14,8 +14,9 @@
     "preview:whatsapp:json": "node previsualizar_whatsapp.js --json",
     "preview:whatsapp:tudo:json": "node previsualizar_whatsapp.js --ignorar-data --json",
     "inspecionar": "node ver_campos.js",
-    "verificar": "node --check airtable.js && node --check email_template.js && node --check enviar_email.js && node --check whatsapp_template.js && node --check enviar_whatsapp.js && node --check enviar_todos.js && node --check previsualizar_whatsapp.js && node --check ver_campos.js && node --check server.js",
-    "test": "npm run verificar"
+    "verificar": "node --check airtable.js && node --check email_template.js && node --check enviar_email.js && node --check whatsapp_template.js && node --check enviar_whatsapp.js && node --check enviar_todos.js && node --check previsualizar_whatsapp.js && node --check validar_whatsapp_local.js && node --check ver_campos.js && node --check server.js",
+    "test": "npm run verificar",
+    "validar:whatsapp": "node validar_whatsapp_local.js"
   },
   "engines": {
     "node": ">=20"

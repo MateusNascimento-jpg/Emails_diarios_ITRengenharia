@@ -33,6 +33,7 @@ const {
 // ============================================================
 // LEITURA DO AMBIENTE
 // ============================================================
+
 function textoEnv(nome, padrao = '') {
   return String(
     process.env[nome] ?? padrao
@@ -55,7 +56,10 @@ function booleanoEnv(nome, padrao = false) {
   ].includes(valor.toLowerCase());
 }
 
-function numeroInteiroPositivo(valor, padrao) {
+function numeroInteiroPositivo(
+  valor,
+  padrao
+) {
   const numero = Number.parseInt(
     String(valor ?? ''),
     10
@@ -572,6 +576,49 @@ function validarConfiguracaoMeta() {
     };
   }
 
+  if (
+    !/^\d+$/.test(
+      CONFIG.phoneNumberId
+    )
+  ) {
+    return {
+      ok: false,
+
+      motivo:
+        'phone-number-id-invalido',
+
+      mensagem:
+        'WHATSAPP_PHONE_NUMBER_ID deve conter ' +
+        'somente números.',
+    };
+  }
+
+  try {
+    const graphUrl =
+      new URL(
+        CONFIG.graphBaseUrl
+      );
+
+    if (
+      graphUrl.protocol !== 'https:'
+    ) {
+      throw new Error(
+        'protocolo'
+      );
+    }
+  } catch {
+    return {
+      ok: false,
+
+      motivo:
+        'graph-base-url-invalida',
+
+      mensagem:
+        'WHATSAPP_GRAPH_BASE_URL deve ser ' +
+        'uma URL HTTPS válida.',
+    };
+  }
+
   return {
     ok: true,
     ausentes: [],
@@ -582,18 +629,97 @@ function validarConfiguracaoMeta() {
 // LOG SEGURO DO PAYLOAD
 // ============================================================
 
-function payloadSeguroParaLog(payload) {
+function payloadSeguroParaLog(
+  payload
+) {
   if (!payload) {
     return null;
   }
 
-  return {
-    ...payload,
+  const seguro = JSON.parse(
+    JSON.stringify(payload)
+  );
 
-    to: mascararTelefone(
-      payload.to
-    ),
-  };
+  seguro.to =
+    mascararTelefone(
+      seguro.to
+    );
+
+  const componentes =
+    seguro?.template?.components;
+
+  if (Array.isArray(componentes)) {
+    for (
+      const componente
+      of componentes
+    ) {
+      if (
+        !Array.isArray(
+          componente?.parameters
+        )
+      ) {
+        continue;
+      }
+
+      componente.parameters =
+        componente.parameters.map(
+          parametro => {
+            if (
+              parametro?.type === 'text'
+            ) {
+              const tamanho =
+                String(
+                  parametro.text ?? ''
+                ).length;
+
+              return {
+                type:
+                  'text',
+
+                parameter_name:
+                  parametro.parameter_name,
+
+                text:
+                  `[CONTEÚDO OCULTO: ` +
+                  `${tamanho} caractere(s)]`,
+              };
+            }
+
+            if (
+              parametro?.image?.link
+            ) {
+              return {
+                type:
+                  'image',
+
+                image: {
+                  link:
+                    '[URL HTTPS CONFIGURADA]',
+                },
+              };
+            }
+
+            if (
+              parametro?.image?.id
+            ) {
+              return {
+                type:
+                  'image',
+
+                image: {
+                  id:
+                    '[MEDIA ID OCULTO]',
+                },
+              };
+            }
+
+            return parametro;
+          }
+        );
+    }
+  }
+
+  return seguro;
 }
 
 // ============================================================
@@ -629,6 +755,7 @@ function extrairMensagemErroMeta(
 
   const partes = [
     erro.message,
+    erro.error_data?.details,
     erro.error_user_msg,
     erro.error_user_title,
   ]
@@ -707,41 +834,49 @@ async function requisitarMeta(
 
   for (
     let tentativa = 1;
-    tentativa <= CONFIG.maxTentativas;
+    tentativa <=
+      CONFIG.maxTentativas;
     tentativa += 1
   ) {
     const controlador =
       new AbortController();
 
-    const temporizador = setTimeout(
-      () => controlador.abort(),
-      CONFIG.timeoutMs
-    );
+    const temporizador =
+      setTimeout(
+        () =>
+          controlador.abort(),
+
+        CONFIG.timeoutMs
+      );
 
     try {
-      const resposta = await fetch(
-        endpoint,
-        {
-          method: 'POST',
+      const resposta =
+        await fetch(
+          endpoint,
+          {
+            method:
+              'POST',
 
-          headers: {
-            Authorization:
-              `Bearer ${CONFIG.accessToken}`,
+            headers: {
+              Authorization:
+                `Bearer ${CONFIG.accessToken}`,
 
-            'Content-Type':
-              'application/json',
+              'Content-Type':
+                'application/json',
 
-            Accept:
-              'application/json',
-          },
+              Accept:
+                'application/json',
+            },
 
-          body:
-            JSON.stringify(payload),
+            body:
+              JSON.stringify(
+                payload
+              ),
 
-          signal:
-            controlador.signal,
-        }
-      );
+            signal:
+              controlador.signal,
+          }
+        );
 
       const dados =
         await lerRespostaMeta(
@@ -761,6 +896,31 @@ async function requisitarMeta(
         const messageId =
           dados?.messages?.[0]?.id ||
           '';
+
+        if (!messageId) {
+          return {
+            ok: false,
+
+            statusHttp:
+              resposta.status,
+
+            dados,
+
+            messageId:
+              '',
+
+            requestId,
+
+            tentativa,
+
+            mensagem:
+              'A Meta respondeu com sucesso, ' +
+              'mas não retornou o ID da mensagem.',
+
+            tipoErro:
+              'resposta-meta-sem-message-id',
+          };
+        }
 
         return {
           ok: true,
@@ -830,32 +990,38 @@ async function requisitarMeta(
       await dormir(espera);
     } catch (erro) {
       const foiTimeout =
-        erro?.name === 'AbortError';
+        erro?.name ===
+        'AbortError';
 
       ultimoResultado = {
         ok: false,
 
-        statusHttp: 0,
+        statusHttp:
+          0,
 
-        dados: {},
+        dados:
+          {},
 
-        requestId: '',
+        requestId:
+          '',
 
         tentativa,
 
-        mensagem: foiTimeout
-          ? (
-              `A Meta não respondeu em ` +
-              `${CONFIG.timeoutMs} ms.`
-            )
-          : (
-              erro?.message ||
-              'Falha de rede ao acessar a Meta.'
-            ),
+        mensagem:
+          foiTimeout
+            ? (
+                `A Meta não respondeu em ` +
+                `${CONFIG.timeoutMs} ms.`
+              )
+            : (
+                erro?.message ||
+                'Falha de rede ao acessar a Meta.'
+              ),
 
-        tipoErro: foiTimeout
-          ? 'timeout'
-          : 'rede',
+        tipoErro:
+          foiTimeout
+            ? 'timeout'
+            : 'rede',
       };
 
       // Por segurança, uma falha de rede ou timeout
@@ -877,9 +1043,11 @@ async function requisitarMeta(
     ultimoResultado || {
       ok: false,
 
-      statusHttp: 0,
+      statusHttp:
+        0,
 
-      dados: {},
+      dados:
+        {},
 
       mensagem:
         'Falha desconhecida no envio à Meta.',
@@ -990,6 +1158,7 @@ function prepararEnvioWhatsAppDaOS({
     montarPayloadTemplateWhatsApp({
       cliente,
       ordem,
+
       telefone:
         destino.telefone,
     });
@@ -1028,6 +1197,15 @@ function prepararEnvioWhatsAppDaOS({
 
     formatoDetalhes:
       resultadoPayload.formatoDetalhes,
+
+    tamanhoDetalhes:
+      resultadoPayload.tamanhoDetalhes,
+
+    tamanhoCorpoEstimado:
+      resultadoPayload.tamanhoCorpoEstimado,
+
+    limiteCorpo:
+      resultadoPayload.limiteCorpo,
 
     telefone:
       destino.telefone,
@@ -1125,17 +1303,21 @@ async function enviarWhatsAppDaOS({
     return {
       ...preparado,
 
-      enviado: false,
+      enviado:
+        false,
 
-      simulado: false,
+      simulado:
+        false,
 
-      ignorado: false,
+      ignorado:
+        false,
     };
   }
 
   if (CONFIG.logPayload) {
     console.log(
       '[WhatsApp] Payload preparado:',
+
       JSON.stringify(
         payloadSeguroParaLog(
           preparado.payload
@@ -1162,11 +1344,14 @@ async function enviarWhatsAppDaOS({
     return {
       ok: true,
 
-      enviado: false,
+      enviado:
+        false,
 
-      simulado: true,
+      simulado:
+        true,
 
-      ignorado: false,
+      ignorado:
+        false,
 
       motivo:
         'simulacao',
@@ -1191,11 +1376,14 @@ async function enviarWhatsAppDaOS({
     return {
       ...configuracaoMeta,
 
-      enviado: false,
+      enviado:
+        false,
 
-      simulado: false,
+      simulado:
+        false,
 
-      ignorado: false,
+      ignorado:
+        false,
 
       clienteId:
         preparado.clienteId,
@@ -1221,7 +1409,9 @@ async function enviarWhatsAppDaOS({
     `${preparado.quantidadeItens} item(ns) | ` +
     `destino ${preparado.telefoneMascarado} | ` +
     `Phone Number ID ` +
-    `${mascararId(CONFIG.phoneNumberId)}`
+    `${mascararId(
+      CONFIG.phoneNumberId
+    )}`
   );
 
   const respostaMeta =
@@ -1238,13 +1428,17 @@ async function enviarWhatsAppDaOS({
     );
 
     return {
-      ok: false,
+      ok:
+        false,
 
-      enviado: false,
+      enviado:
+        false,
 
-      simulado: false,
+      simulado:
+        false,
 
-      ignorado: false,
+      ignorado:
+        false,
 
       motivo:
         'erro-meta',
@@ -1266,6 +1460,24 @@ async function enviarWhatsAppDaOS({
         respostaMeta.dados ||
         {},
 
+      codigoMeta:
+        respostaMeta.dados?.error?.code ??
+        null,
+
+      subcodigoMeta:
+        respostaMeta.dados?.error
+          ?.error_subcode ??
+        null,
+
+      detalhesMeta:
+        respostaMeta.dados?.error
+          ?.error_data?.details ||
+        '',
+
+      tipoErro:
+        respostaMeta.tipoErro ||
+        '',
+
       clienteId:
         preparado.clienteId,
 
@@ -1283,6 +1495,18 @@ async function enviarWhatsAppDaOS({
 
       quantidadeItens:
         preparado.quantidadeItens,
+
+      formatoDetalhes:
+        preparado.formatoDetalhes,
+
+      tamanhoDetalhes:
+        preparado.tamanhoDetalhes,
+
+      tamanhoCorpoEstimado:
+        preparado.tamanhoCorpoEstimado,
+
+      limiteCorpo:
+        preparado.limiteCorpo,
     };
   }
 
@@ -1297,15 +1521,20 @@ async function enviarWhatsAppDaOS({
   );
 
   return {
-    ok: true,
+    ok:
+      true,
 
-    enviado: true,
+    enviado:
+      true,
 
-    simulado: false,
+    simulado:
+      false,
 
-    ignorado: false,
+    ignorado:
+      false,
 
-    motivo: '',
+    motivo:
+      '',
 
     messageId:
       respostaMeta.messageId,
@@ -1342,11 +1571,20 @@ async function enviarWhatsAppDaOS({
 
     formatoDetalhes:
       preparado.formatoDetalhes,
+
+    tamanhoDetalhes:
+      preparado.tamanhoDetalhes,
+
+    tamanhoCorpoEstimado:
+      preparado.tamanhoCorpoEstimado,
+
+    limiteCorpo:
+      preparado.limiteCorpo,
   };
 }
 
 // ============================================================
-// EXPORTAÇÕES do servidor whatssap. 
+// EXPORTAÇÕES
 // ============================================================
 
 module.exports = {

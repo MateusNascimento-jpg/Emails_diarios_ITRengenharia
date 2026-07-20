@@ -24,7 +24,7 @@ const {
 const ARGUMENTOS = new Set(
   process.argv.slice(2)
 );
-// Não filtrar por data por enquanto
+
 const IGNORAR_DATA =
   ARGUMENTOS.has('--ignorar-data');
 
@@ -91,21 +91,6 @@ function linhaSeparadora(
 ) {
   return caractere.repeat(
     tamanho
-  );
-}
-
-function contarOrdens(clientes) {
-  return clientes.reduce(
-    (total, cliente) => {
-      const ordens = Array.isArray(
-        cliente?.ordens
-      )
-        ? cliente.ordens
-        : [];
-
-      return total + ordens.length;
-    },
-    0
   );
 }
 
@@ -221,6 +206,15 @@ function analisarOrdem(
       tamanho:
         resultado.tamanho,
 
+      limiteCorpo:
+        resultado.limiteCorpo,
+
+      tamanhoCorpoEstimado:
+        resultado.tamanhoCorpoEstimado,
+
+      formatoTentado:
+        resultado.formatoTentado,
+
       quantidadeItens:
         resultado.quantidadeItens || 0,
     };
@@ -238,6 +232,15 @@ function analisarOrdem(
 
     formatoDetalhes:
       resultado.formatoDetalhes,
+
+    tamanhoDetalhes:
+      resultado.tamanhoDetalhes,
+
+    tamanhoCorpoEstimado:
+      resultado.tamanhoCorpoEstimado,
+
+    limiteCorpo:
+      resultado.limiteCorpo,
 
     ordemServico:
       resultado.contexto
@@ -290,7 +293,7 @@ function gerarRelatorio(
     mensagens.filter(
       item => !item.ok
     );
-    
+
   return {
     geradoEm:
       new Date().toISOString(),
@@ -310,6 +313,12 @@ function gerarRelatorio(
 
       limiteCaracteres:
         TEMPLATE_CONFIG.detailsMaxChars,
+
+      limiteCorpo:
+        TEMPLATE_CONFIG.templateBodyMaxChars,
+
+      margemSeguranca:
+        TEMPLATE_CONFIG.templateBodySafetyMargin,
     },
 
     totais: {
@@ -384,8 +393,18 @@ function mostrarCabecalho(
   );
 
   console.log(
-    `Limite interno: ` +
+    `Limite interno dos detalhes: ` +
     `${relatorio.configuracaoDetalhes.limiteCaracteres} caracteres`
+  );
+
+  console.log(
+    `Limite do corpo do template: ` +
+    `${relatorio.configuracaoDetalhes.limiteCorpo} caracteres`
+  );
+
+  console.log(
+    `Margem preventiva: ` +
+    `${relatorio.configuracaoDetalhes.margemSeguranca} caracteres`
   );
 
   console.log(
@@ -507,11 +526,22 @@ function mostrarMensagem(
       mensagem.limite !== undefined
     ) {
       console.log(
-        `Tamanho: ${mensagem.tamanho}`
+        `Detalhes: ${mensagem.tamanho}/${mensagem.limite} caractere(s)`
       );
+    }
 
+    if (
+      mensagem.tamanhoCorpoEstimado !== undefined &&
+      mensagem.limiteCorpo !== undefined
+    ) {
       console.log(
-        `Limite: ${mensagem.limite}`
+        `Corpo final estimado: ${mensagem.tamanhoCorpoEstimado}/${mensagem.limiteCorpo} caractere(s)`
+      );
+    }
+
+    if (mensagem.formatoTentado) {
+      console.log(
+        `Formato tentado: ${mensagem.formatoTentado}`
       );
     }
 
@@ -528,6 +558,14 @@ function mostrarMensagem(
     `Formato usado: ${
       mensagem.formatoDetalhes
     }`
+  );
+
+  console.log(
+    `Detalhes: ${mensagem.tamanhoDetalhes}/${TEMPLATE_CONFIG.detailsMaxChars} caractere(s)`
+  );
+
+  console.log(
+    `Corpo final estimado: ${mensagem.tamanhoCorpoEstimado}/${mensagem.limiteCorpo} caractere(s)`
   );
 
   console.log('');

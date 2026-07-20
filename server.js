@@ -20,7 +20,9 @@ const {
 // ============================================================
 
 function textoEnv(nome, padrao = '') {
-  return String(process.env[nome] ?? padrao).trim();
+  return String(
+    process.env[nome] ?? padrao
+  ).trim();
 }
 
 function booleanoEnv(nome, padrao = false) {
@@ -39,7 +41,10 @@ function booleanoEnv(nome, padrao = false) {
   ].includes(valor.toLowerCase());
 }
 
-function numeroInteiroPositivo(valor, padrao) {
+function numeroInteiroPositivo(
+  valor,
+  padrao
+) {
   const numero = Number.parseInt(
     String(valor ?? ''),
     10
@@ -86,7 +91,8 @@ const CONFIG = Object.freeze({
     '32kb'
   ),
 
-  webhookRota: '/webhook/whatsapp',
+  webhookRota:
+    '/webhook/whatsapp',
 
   webhookVerifyToken: textoEnv(
     'WHATSAPP_WEBHOOK_VERIFY_TOKEN'
@@ -96,10 +102,11 @@ const CONFIG = Object.freeze({
     'META_APP_SECRET'
   ),
 
-  webhookValidarAssinatura: booleanoEnv(
-    'WHATSAPP_WEBHOOK_VALIDAR_ASSINATURA',
-    true
-  ),
+  webhookValidarAssinatura:
+    booleanoEnv(
+      'WHATSAPP_WEBHOOK_VALIDAR_ASSINATURA',
+      true
+    ),
 
   webhookJsonLimite: textoEnv(
     'WHATSAPP_WEBHOOK_JSON_LIMITE',
@@ -115,21 +122,45 @@ const estado = {
   iniciadoEm:
     new Date().toISOString(),
 
-  ultimaExecucaoIniciadaEm: null,
-  ultimaExecucaoFinalizadaEm: null,
-  ultimaOrigem: null,
-  ultimoResultado: null,
-  ultimoErro: null,
+  ultimaExecucaoIniciadaEm:
+    null,
+
+  ultimaExecucaoFinalizadaEm:
+    null,
+
+  ultimaOrigem:
+    null,
+
+  ultimoResultado:
+    null,
+
+  ultimoErro:
+    null,
 
   webhook: {
-    totalRecebidos: 0,
-    totalMensagensRecebidas: 0,
-    totalStatusRecebidos: 0,
-    totalTemplatesRecebidos: 0,
-    totalOutrosEventos: 0,
-    ultimoRecebidoEm: null,
-    ultimoEvento: null,
-    ultimoErro: null,
+    totalRecebidos:
+      0,
+
+    totalMensagensRecebidas:
+      0,
+
+    totalStatusRecebidos:
+      0,
+
+    totalTemplatesRecebidos:
+      0,
+
+    totalOutrosEventos:
+      0,
+
+    ultimoRecebidoEm:
+      null,
+
+    ultimoEvento:
+      null,
+
+    ultimoErro:
+      null,
   },
 };
 
@@ -142,49 +173,62 @@ let tarefaCron = null;
 
 const app = express();
 
-app.disable('x-powered-by');
-app.set('trust proxy', 1);
+app.disable(
+  'x-powered-by'
+);
 
-app.use((req, res, next) => {
-  res.setHeader(
-    'Cache-Control',
-    'no-store, no-cache, must-revalidate'
-  );
+app.set(
+  'trust proxy',
+  1
+);
 
-  res.setHeader(
-    'Pragma',
-    'no-cache'
-  );
+app.use(
+  (req, res, next) => {
+    res.setHeader(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate'
+    );
 
-  next();
-});
+    res.setHeader(
+      'Pragma',
+      'no-cache'
+    );
+
+    next();
+  }
+);
 
 // O webhook precisa guardar os bytes originais para validar
 // X-Hub-Signature-256 com HMAC-SHA256.
-const webhookJsonParser = express.json({
-  limit:
-    CONFIG.webhookJsonLimite,
 
-  strict: true,
+const webhookJsonParser =
+  express.json({
+    limit:
+      CONFIG.webhookJsonLimite,
 
-  verify: (req, res, buffer) => {
-    req.rawBody =
-      Buffer.from(buffer);
-  },
-});
+    strict:
+      true,
+
+    verify:
+      (req, res, buffer) => {
+        req.rawBody =
+          Buffer.from(buffer);
+      },
+  });
 
 // ============================================================
 // AUXILIARES
 // ============================================================
 
 function agoraEmBrasilia() {
-  return new Date().toLocaleString(
-    'pt-BR',
-    {
-      timeZone:
-        CONFIG.timezone,
-    }
-  );
+  return new Date()
+    .toLocaleString(
+      'pt-BR',
+      {
+        timeZone:
+          CONFIG.timezone,
+      }
+    );
 }
 
 function valorBooleano(valor) {
@@ -227,10 +271,14 @@ function compararSegredos(
   }
 
   const bufferRecebido =
-    Buffer.from(valorRecebido);
+    Buffer.from(
+      valorRecebido
+    );
 
   const bufferEsperado =
-    Buffer.from(valorEsperado);
+    Buffer.from(
+      valorEsperado
+    );
 
   if (
     bufferRecebido.length !==
@@ -246,8 +294,12 @@ function compararSegredos(
 }
 
 function somenteDigitos(valor) {
-  return String(valor || '')
-    .replace(/\D/g, '');
+  return String(
+    valor || ''
+  ).replace(
+    /\D/g,
+    ''
+  );
 }
 
 function mascararTelefone(valor) {
@@ -276,19 +328,28 @@ function mascararTelefone(valor) {
   const sufixo =
     digitos.slice(-4);
 
-  return `${prefixo}*****${sufixo}`;
+  return (
+    `${prefixo}` +
+    `*****` +
+    `${sufixo}`
+  );
 }
 
 function mascararIdentificador(valor) {
   const texto =
-    String(valor || '').trim();
+    String(
+      valor || ''
+    ).trim();
 
   if (!texto) {
     return null;
   }
 
   if (texto.length <= 12) {
-    return `${texto.slice(0, 3)}***`;
+    return (
+      `${texto.slice(0, 3)}` +
+      `***`
+    );
   }
 
   return (
@@ -298,7 +359,9 @@ function mascararIdentificador(valor) {
   );
 }
 
-function dataIsoDeTimestampUnix(valor) {
+function dataIsoDeTimestampUnix(
+  valor
+) {
   const segundos =
     Number(valor);
 
@@ -316,14 +379,18 @@ function dataIsoDeTimestampUnix(valor) {
 
 function extrairChaveManual(req) {
   const xApiKey =
-    req.get('x-api-key');
+    req.get(
+      'x-api-key'
+    );
 
   if (xApiKey) {
     return xApiKey;
   }
 
   const authorization =
-    req.get('authorization');
+    req.get(
+      'authorization'
+    );
 
   if (
     authorization &&
@@ -431,7 +498,8 @@ function resumoSeguroWebhook() {
       CONFIG.webhookRota,
 
     totalRecebidos:
-      estado.webhook.totalRecebidos,
+      estado.webhook
+        .totalRecebidos,
 
     totalMensagensRecebidas:
       estado.webhook
@@ -481,24 +549,34 @@ function assinaturaWebhookValida(req) {
 
   if (
     !/^sha256=[a-f0-9]{64}$/i
-      .test(assinaturaRecebida)
+      .test(
+        assinaturaRecebida
+      )
   ) {
     return false;
   }
 
   const corpoOriginal =
-    Buffer.isBuffer(req.rawBody)
+    Buffer.isBuffer(
+      req.rawBody
+    )
       ? req.rawBody
       : Buffer.from('');
 
   const assinaturaEsperada =
-    `sha256=${crypto
-      .createHmac(
-        'sha256',
-        CONFIG.metaAppSecret
-      )
-      .update(corpoOriginal)
-      .digest('hex')}`;
+    `sha256=${
+      crypto
+        .createHmac(
+          'sha256',
+          CONFIG.metaAppSecret
+        )
+        .update(
+          corpoOriginal
+        )
+        .digest(
+          'hex'
+        )
+    }`;
 
   return compararSegredos(
     assinaturaRecebida
@@ -513,14 +591,16 @@ function registrarEventoWebhook(
   tipo,
   dados
 ) {
-  estado.webhook.ultimoEvento = {
-    tipo,
+  estado.webhook
+    .ultimoEvento = {
+      tipo,
 
-    recebidoEm:
-      new Date().toISOString(),
+      recebidoEm:
+        new Date()
+          .toISOString(),
 
-    ...dados,
-  };
+      ...dados,
+    };
 }
 
 function registrarErroWebhook(
@@ -535,11 +615,13 @@ function registrarErroWebhook(
     contexto,
 
     ocorridoEm:
-      new Date().toISOString(),
+      new Date()
+        .toISOString(),
   };
 
-  estado.webhook.ultimoErro =
-    resumo;
+  estado.webhook
+    .ultimoErro =
+      resumo;
 
   console.error(
     `[Webhook WhatsApp] Erro: ` +
@@ -551,12 +633,16 @@ function registrarErroWebhook(
 // PROCESSAMENTO DOS EVENTOS DO WHATSAPP
 // ============================================================
 
-function tratarStatusMensagem(status) {
+function tratarStatusMensagem(
+  status
+) {
   estado.webhook
     .totalStatusRecebidos += 1;
 
   const erros =
-    Array.isArray(status?.errors)
+    Array.isArray(
+      status?.errors
+    )
       ? status.errors.map(
           item => ({
             codigo:
@@ -614,10 +700,17 @@ function tratarStatusMensagem(status) {
     `[Webhook WhatsApp] Status: ` +
     `${resumo.status}; ` +
     `mensagem: ` +
-    `${resumo.messageId || 'não informada'}; ` +
+    `${
+      resumo.messageId ||
+      'não informada'
+    }; ` +
     `destinatário: ` +
-    `${resumo.destinatario || 'não informado'}; ` +
-    `erros: ${resumo.quantidadeErros}.`
+    `${
+      resumo.destinatario ||
+      'não informado'
+    }; ` +
+    `erros: ` +
+    `${resumo.quantidadeErros}.`
   );
 }
 
@@ -656,11 +749,18 @@ function tratarMensagemRecebida(
   console.log(
     `[Webhook WhatsApp] ` +
     `Mensagem recebida; ` +
-    `tipo: ${resumo.tipoMensagem}; ` +
+    `tipo: ` +
+    `${resumo.tipoMensagem}; ` +
     `remetente: ` +
-    `${resumo.remetente || 'não informado'}; ` +
+    `${
+      resumo.remetente ||
+      'não informado'
+    }; ` +
     `id: ` +
-    `${resumo.messageId || 'não informado'}.`
+    `${
+      resumo.messageId ||
+      'não informado'
+    }.`
   );
 }
 
@@ -677,18 +777,21 @@ function tratarAtualizacaoTemplate(
       'desconhecido',
 
     nome:
-      valor?.message_template_name ||
+      valor
+        ?.message_template_name ||
       valor?.name ||
       null,
 
     idioma:
-      valor?.message_template_language ||
+      valor
+        ?.message_template_language ||
       valor?.language ||
       null,
 
     templateId:
       mascararIdentificador(
-        valor?.message_template_id ||
+        valor
+          ?.message_template_id ||
         valor?.id
       ),
 
@@ -707,12 +810,22 @@ function tratarAtualizacaoTemplate(
 
   console.log(
     `[Webhook WhatsApp] Template: ` +
-    `${resumo.nome || 'não informado'}; ` +
+    `${
+      resumo.nome ||
+      'não informado'
+    }; ` +
     `idioma: ` +
-    `${resumo.idioma || 'não informado'}; ` +
-    `evento: ${resumo.evento}; ` +
+    `${
+      resumo.idioma ||
+      'não informado'
+    }; ` +
+    `evento: ` +
+    `${resumo.evento}; ` +
     `motivo: ` +
-    `${resumo.motivo || 'não informado'}.`
+    `${
+      resumo.motivo ||
+      'não informado'
+    }.`
   );
 }
 
@@ -720,7 +833,9 @@ async function processarWebhookWhatsApp(
   payload
 ) {
   const entradas =
-    Array.isArray(payload?.entry)
+    Array.isArray(
+      payload?.entry
+    )
       ? payload.entry
       : [];
 
@@ -746,7 +861,10 @@ async function processarWebhookWhatsApp(
         alteracao?.value ||
         {};
 
-      if (campo === 'messages') {
+      if (
+        campo ===
+        'messages'
+      ) {
         const mensagens =
           Array.isArray(
             valor?.messages
@@ -822,22 +940,23 @@ async function processarWebhookWhatsApp(
 // ============================================================
 
 // Verificação inicial da URL de callback pela Meta.
+
 app.get(
   CONFIG.webhookRota,
 
   (req, res) => {
     const modo =
       String(
-        req.query?.['hub.mode'] ||
-        ''
+        req.query?.[
+          'hub.mode'
+        ] || ''
       );
 
     const tokenRecebido =
       String(
         req.query?.[
           'hub.verify_token'
-        ] ||
-        ''
+        ] || ''
       );
 
     const desafio =
@@ -857,7 +976,8 @@ app.get(
       return res
         .status(503)
         .json({
-          ok: false,
+          ok:
+            false,
 
           motivo:
             'webhook-nao-configurado',
@@ -880,7 +1000,8 @@ app.get(
       return res
         .status(403)
         .json({
-          ok: false,
+          ok:
+            false,
 
           motivo:
             'verificacao-recusada',
@@ -894,7 +1015,9 @@ app.get(
 
     return res
       .status(200)
-      .type('text/plain')
+      .type(
+        'text/plain'
+      )
       .send(
         String(
           desafio ??
@@ -905,6 +1028,7 @@ app.get(
 );
 
 // Eventos enviados pela Meta.
+
 app.post(
   CONFIG.webhookRota,
 
@@ -912,7 +1036,8 @@ app.post(
 
   (req, res) => {
     if (
-      CONFIG.webhookValidarAssinatura &&
+      CONFIG
+        .webhookValidarAssinatura &&
       !CONFIG.metaAppSecret
     ) {
       registrarErroWebhook(
@@ -927,7 +1052,8 @@ app.post(
       return res
         .status(503)
         .json({
-          ok: false,
+          ok:
+            false,
 
           motivo:
             'app-secret-nao-configurado',
@@ -935,7 +1061,9 @@ app.post(
     }
 
     if (
-      !assinaturaWebhookValida(req)
+      !assinaturaWebhookValida(
+        req
+      )
     ) {
       console.warn(
         '[Webhook WhatsApp] ' +
@@ -945,7 +1073,8 @@ app.post(
       return res
         .status(401)
         .json({
-          ok: false,
+          ok:
+            false,
 
           motivo:
             'assinatura-invalida',
@@ -959,7 +1088,8 @@ app.post(
       return res
         .status(404)
         .json({
-          ok: false,
+          ok:
+            false,
 
           motivo:
             'objeto-nao-suportado',
@@ -971,10 +1101,12 @@ app.post(
 
     estado.webhook
       .ultimoRecebidoEm =
-        new Date().toISOString();
+        new Date()
+          .toISOString();
 
     // Responde imediatamente para evitar
     // reentregas causadas por timeout.
+
     res.sendStatus(200);
 
     setImmediate(() => {
@@ -994,18 +1126,21 @@ app.post(
 
 // Parsers das demais rotas.
 // Devem permanecer depois do parser específico do webhook.
+
 app.use(
   express.json({
     limit:
       CONFIG.jsonLimite,
 
-    strict: true,
+    strict:
+      true,
   })
 );
 
 app.use(
   express.urlencoded({
-    extended: false,
+    extended:
+      false,
 
     limit:
       CONFIG.jsonLimite,
@@ -1020,11 +1155,14 @@ async function executarControlado({
   origem,
   ignorarData = false,
 }) {
-  estado.ultimaExecucaoIniciadaEm =
-    new Date().toISOString();
+  estado
+    .ultimaExecucaoIniciadaEm =
+      new Date()
+        .toISOString();
 
-  estado.ultimaExecucaoFinalizadaEm =
-    null;
+  estado
+    .ultimaExecucaoFinalizadaEm =
+      null;
 
   estado.ultimaOrigem =
     origem;
@@ -1037,7 +1175,11 @@ async function executarControlado({
     `Disparo iniciado. ` +
     `Origem: ${origem}. ` +
     `Ignorar data: ` +
-    `${ignorarData ? 'sim' : 'não'}.`
+    `${
+      ignorarData
+        ? 'sim'
+        : 'não'
+    }.`
   );
 
   try {
@@ -1048,10 +1190,14 @@ async function executarControlado({
       });
 
     estado.ultimoResultado =
-      resumoSeguro(resultado);
+      resumoSeguro(
+        resultado
+      );
 
-    estado.ultimaExecucaoFinalizadaEm =
-      new Date().toISOString();
+    estado
+      .ultimaExecucaoFinalizadaEm =
+        new Date()
+          .toISOString();
 
     return resultado;
   } catch (erro) {
@@ -1061,11 +1207,14 @@ async function executarControlado({
         String(erro),
 
       ocorridoEm:
-        new Date().toISOString(),
+        new Date()
+          .toISOString(),
     };
 
-    estado.ultimaExecucaoFinalizadaEm =
-      new Date().toISOString();
+    estado
+      .ultimaExecucaoFinalizadaEm =
+        new Date()
+          .toISOString();
 
     throw erro;
   }
@@ -1074,35 +1223,12 @@ async function executarControlado({
 // ============================================================
 // SAÚDE E STATUS
 // ============================================================
-// Logo pública usada no cabeçalho do modelo do WhatsApp.
-app.get(
-  '/assets/logo.png',
 
-  (req, res, next) => {
-    res.setHeader(
-      'Cache-Control',
-      'public, max-age=86400'
-    );
+// Logo pública usada no cabeçalho do template do WhatsApp.
 
-    res.sendFile(
-      'assets/logo.png',
-
-      {
-        root: __dirname,
-      },
-
-      erro => {
-        if (erro) {
-          next(erro);
-        }
-      }
-    );
-  }
-);
-
-// Logo com fundo escuro usada no cabeçalho do WhatsApp.
 app.get(
   '/assets/logo-whatsapp.jpeg',
+
   (req, res, next) => {
     res.setHeader(
       'Cache-Control',
@@ -1111,9 +1237,12 @@ app.get(
 
     res.sendFile(
       'assets/logo-whatsapp.jpeg',
+
       {
-        root: __dirname,
+        root:
+          __dirname,
       },
+
       erro => {
         if (erro) {
           next(erro);
@@ -1123,87 +1252,105 @@ app.get(
   }
 );
 
+app.get(
+  '/',
 
-app.get('/', (req, res) => {
-  res.status(200).json({
-    ok: true,
+  (req, res) => {
+    res.status(200).json({
+      ok:
+        true,
 
-    servico:
-      'ITR Engenharia — E-mails e WhatsApp',
+      servico:
+        'ITR Engenharia — E-mails e WhatsApp',
 
-    mensagem:
-      'Servidor funcionando.',
+      mensagem:
+        'Servidor funcionando.',
 
-    iniciadoEm:
-      estado.iniciadoEm,
+      iniciadoEm:
+        estado.iniciadoEm,
 
-    timezone:
-      CONFIG.timezone,
+      timezone:
+        CONFIG.timezone,
 
-    cronAtivo:
-      CONFIG.cronAtivo,
+      cronAtivo:
+        CONFIG.cronAtivo,
 
-    cronHorario:
-      CONFIG.cronAtivo
-        ? CONFIG.cronHorario
-        : null,
+      cronHorario:
+        CONFIG.cronAtivo
+          ? CONFIG.cronHorario
+          : null,
 
-    execucaoEmAndamento:
-      existeExecucaoEmAndamento(),
+      execucaoEmAndamento:
+        existeExecucaoEmAndamento(),
 
-    webhook: {
-      configurado:
-        Boolean(
-          CONFIG.webhookVerifyToken
-        ),
+      webhook: {
+        configurado:
+          Boolean(
+            CONFIG.webhookVerifyToken
+          ),
 
-      validarAssinatura:
-        CONFIG.webhookValidarAssinatura,
+        validarAssinatura:
+          CONFIG
+            .webhookValidarAssinatura,
 
-      rota:
-        CONFIG.webhookRota,
-    },
-  });
-});
+        rota:
+          CONFIG.webhookRota,
+      },
+    });
+  }
+);
 
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    ok: true,
+app.get(
+  '/health',
 
-    status:
-      'healthy',
+  (req, res) => {
+    res.status(200).json({
+      ok:
+        true,
 
-    timestamp:
-      new Date().toISOString(),
-  });
-});
+      status:
+        'healthy',
 
-app.get('/status', (req, res) => {
-  res.status(200).json({
-    ok: true,
+      timestamp:
+        new Date()
+          .toISOString(),
+    });
+  }
+);
 
-    execucaoEmAndamento:
-      existeExecucaoEmAndamento(),
+app.get(
+  '/status',
 
-    ultimaExecucaoIniciadaEm:
-      estado.ultimaExecucaoIniciadaEm,
+  (req, res) => {
+    res.status(200).json({
+      ok:
+        true,
 
-    ultimaExecucaoFinalizadaEm:
-      estado.ultimaExecucaoFinalizadaEm,
+      execucaoEmAndamento:
+        existeExecucaoEmAndamento(),
 
-    ultimaOrigem:
-      estado.ultimaOrigem,
+      ultimaExecucaoIniciadaEm:
+        estado
+          .ultimaExecucaoIniciadaEm,
 
-    ultimoResultado:
-      estado.ultimoResultado,
+      ultimaExecucaoFinalizadaEm:
+        estado
+          .ultimaExecucaoFinalizadaEm,
 
-    ultimoErro:
-      estado.ultimoErro,
+      ultimaOrigem:
+        estado.ultimaOrigem,
 
-    webhook:
-      resumoSeguroWebhook(),
-  });
-});
+      ultimoResultado:
+        estado.ultimoResultado,
+
+      ultimoErro:
+        estado.ultimoErro,
+
+      webhook:
+        resumoSeguroWebhook(),
+    });
+  }
+);
 
 // ============================================================
 // DISPARO MANUAL
@@ -1219,9 +1366,11 @@ async function rotaDisparoManual(
     return res
       .status(503)
       .json({
-        ok: false,
+        ok:
+          false,
 
-        executado: false,
+        executado:
+          false,
 
         motivo:
           'disparo-manual-desativado',
@@ -1232,14 +1381,18 @@ async function rotaDisparoManual(
   }
 
   if (
-    !requisicaoAutorizada(req)
+    !requisicaoAutorizada(
+      req
+    )
   ) {
     return res
       .status(401)
       .json({
-        ok: false,
+        ok:
+          false,
 
-        executado: false,
+        executado:
+          false,
 
         motivo:
           'nao-autorizado',
@@ -1255,9 +1408,11 @@ async function rotaDisparoManual(
     return res
       .status(409)
       .json({
-        ok: false,
+        ok:
+          false,
 
-        executado: false,
+        executado:
+          false,
 
         motivo:
           'execucao-ja-em-andamento',
@@ -1268,7 +1423,9 @@ async function rotaDisparoManual(
   }
 
   const ignorarData =
-    extrairIgnorarData(req);
+    extrairIgnorarData(
+      req
+    );
 
   try {
     const resultado =
@@ -1293,7 +1450,9 @@ async function rotaDisparoManual(
         ignorarData,
 
         resultado:
-          resumoSeguro(resultado),
+          resumoSeguro(
+            resultado
+          ),
       });
   } catch (erro) {
     console.error(
@@ -1304,9 +1463,11 @@ async function rotaDisparoManual(
     return res
       .status(500)
       .json({
-        ok: false,
+        ok:
+          false,
 
-        executado: true,
+        executado:
+          true,
 
         motivo:
           'erro-no-processamento',
@@ -1342,14 +1503,17 @@ app.get(
 
   async (req, res) => {
     if (
-      !CONFIG.permitirDisparoManualGet
+      !CONFIG
+        .permitirDisparoManualGet
     ) {
       return res
         .status(405)
         .json({
-          ok: false,
+          ok:
+            false,
 
-          executado: false,
+          executado:
+            false,
 
           motivo:
             'metodo-get-desativado',
@@ -1370,17 +1534,20 @@ app.get(
 // 404 E ERROS
 // ============================================================
 
-app.use((req, res) => {
-  res.status(404).json({
-    ok: false,
+app.use(
+  (req, res) => {
+    res.status(404).json({
+      ok:
+        false,
 
-    motivo:
-      'rota-nao-encontrada',
+      motivo:
+        'rota-nao-encontrada',
 
-    mensagem:
-      'Rota não encontrada.',
-  });
-});
+      mensagem:
+        'Rota não encontrada.',
+    });
+  }
+);
 
 app.use(
   (
@@ -1390,14 +1557,16 @@ app.use(
     next
   ) => {
     if (
-      erro instanceof SyntaxError &&
+      erro instanceof
+        SyntaxError &&
       erro.status === 400 &&
       'body' in erro
     ) {
       return res
         .status(400)
         .json({
-          ok: false,
+          ok:
+            false,
 
           motivo:
             'json-invalido',
@@ -1414,7 +1583,8 @@ app.use(
       return res
         .status(413)
         .json({
-          ok: false,
+          ok:
+            false,
 
           motivo:
             'corpo-excede-limite',
@@ -1432,7 +1602,8 @@ app.use(
     return res
       .status(500)
       .json({
-        ok: false,
+        ok:
+          false,
 
         motivo:
           'erro-interno',
@@ -1577,7 +1748,8 @@ function iniciarServidor() {
 
         console.log(
           `Validação da assinatura do webhook: ${
-            CONFIG.webhookValidarAssinatura
+            CONFIG
+              .webhookValidarAssinatura
               ? 'ativada'
               : 'desativada'
           }`
@@ -1626,54 +1798,63 @@ function encerrarServidor(sinal) {
     return;
   }
 
-  servidorHttp.close(erro => {
-    if (erro) {
+  servidorHttp.close(
+    erro => {
+      if (erro) {
+        console.error(
+          `[Servidor] Erro no encerramento: ` +
+          `${erro.message}`
+        );
+
+        process.exit(1);
+        return;
+      }
+
+      console.log(
+        '[Servidor] Encerrado corretamente.'
+      );
+
+      process.exit(0);
+    }
+  );
+
+  setTimeout(
+    () => {
       console.error(
-        `[Servidor] Erro no encerramento: ` +
-        `${erro.message}`
+        '[Servidor] Encerramento forçado após 10 segundos.'
       );
 
       process.exit(1);
-      return;
-    }
-
-    console.log(
-      '[Servidor] Encerrado corretamente.'
-    );
-
-    process.exit(0);
-  });
-
-  setTimeout(() => {
-    console.error(
-      '[Servidor] Encerramento forçado após 10 segundos.'
-    );
-
-    process.exit(1);
-  }, 10000).unref();
+    },
+    10000
+  ).unref();
 }
 
 process.once(
   'SIGTERM',
 
-  () => encerrarServidor(
-    'SIGTERM'
-  )
+  () =>
+    encerrarServidor(
+      'SIGTERM'
+    )
 );
 
 process.once(
   'SIGINT',
 
-  () => encerrarServidor(
-    'SIGINT'
-  )
+  () =>
+    encerrarServidor(
+      'SIGINT'
+    )
 );
 
 // ============================================================
 // EXECUÇÃO DIRETA
 // ============================================================
 
-if (require.main === module) {
+if (
+  require.main === module
+) {
   try {
     iniciarServidor();
   } catch (erro) {
