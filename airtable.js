@@ -4,7 +4,6 @@
 // airtable.js — LEITURA, FILTRO E AGRUPAMENTO DO AIRTABLE
 // ============================================================
 
-
 require('dotenv').config({
   quiet: true,
 });
@@ -73,6 +72,19 @@ function numeroInteiroPositivo(
 const TIMEZONE = campoEnv(
   'APP_TIMEZONE',
   'America/Sao_Paulo'
+);
+
+// Marco oficial da entrada em produção da automação.
+//
+// Registros com alteração anterior a esse instante nunca
+// entram em um envio operacional, mesmo quando a execução
+// utiliza ignorarData=true.
+//
+// O bypass desse corte somente é permitido em modo de
+// auditoria explícito.
+const AUTOMACAO_INICIO_EM = campoEnv(
+  'AUTOMACAO_INICIO_EM',
+  ''
 );
 
 const AIRTABLE_TOKEN = campoEnv(
@@ -531,6 +543,131 @@ function ehDeOntem(
   );
 }
 
+/**
+ * Converte o valor de data/hora do Airtable em um instante
+ * absoluto.
+ *
+ * A proteção de corte exige data e hora completas. Valores
+ * contendo apenas YYYY-MM-DD não são aceitos aqui, porque não
+ * permitem provar que a mudança ocorreu depois do marco.
+ */
+function instanteDoValor(valor) {
+  const bruto = Array.isArray(valor)
+    ? String(valor[0] ?? '').trim()
+    : String(valor ?? '').trim();
+
+  if (
+    !bruto ||
+    /^\d{4}-\d{2}-\d{2}$/.test(bruto)
+  ) {
+    return null;
+  }
+
+  const data = new Date(bruto);
+
+  if (
+    Number.isNaN(data.getTime())
+  ) {
+    return null;
+  }
+
+  return data;
+}
+
+/**
+ * Valida AUTOMACAO_INICIO_EM.
+ *
+ * O valor precisa conter fuso explícito, por exemplo:
+ *
+ * 2026-08-01T00:00:00-03:00
+ *
+ * Isso evita resultados diferentes entre o computador local
+ * e o servidor do Render.
+ */
+function validarInicioAutomacaoConfigurado() {
+  if (!AUTOMACAO_INICIO_EM) {
+    return {
+      ok: false,
+      motivo: 'inicio-automacao-ausente',
+      mensagem:
+        'AUTOMACAO_INICIO_EM não está configurada.',
+      bruto: '',
+      data: null,
+    };
+  }
+
+  const possuiFusoExplicito =
+    /(Z|[+-]\d{2}:\d{2})$/i.test(
+      AUTOMACAO_INICIO_EM
+    );
+
+  if (!possuiFusoExplicito) {
+    return {
+      ok: false,
+      motivo: 'inicio-automacao-sem-fuso',
+      mensagem:
+        'AUTOMACAO_INICIO_EM deve incluir um fuso ' +
+        'explícito, como -03:00 ou Z.',
+      bruto: AUTOMACAO_INICIO_EM,
+      data: null,
+    };
+  }
+
+  const data = new Date(
+    AUTOMACAO_INICIO_EM
+  );
+
+  if (
+    Number.isNaN(data.getTime())
+  ) {
+    return {
+      ok: false,
+      motivo: 'inicio-automacao-invalido',
+      mensagem:
+        'AUTOMACAO_INICIO_EM possui uma data/hora inválida.',
+      bruto: AUTOMACAO_INICIO_EM,
+      data: null,
+    };
+  }
+
+  return {
+    ok: true,
+    motivo: '',
+    mensagem: '',
+    bruto: AUTOMACAO_INICIO_EM,
+    data,
+  };
+}
+
+function ehPosteriorOuIgualAoInicioAutomacao(
+  valorData,
+  inicioAutomacao
+) {
+  const dataRegistro =
+    instanteDoValor(valorData);
+
+  const dataInicio =
+    inicioAutomacao instanceof Date
+      ? inicioAutomacao
+      : new Date(
+          String(
+            inicioAutomacao ?? ''
+          )
+        );
+
+  if (
+    !dataRegistro ||
+    Number.isNaN(dataInicio.getTime())
+  ) {
+    return false;
+  }
+
+  return (
+    dataRegistro.getTime() >=
+    dataInicio.getTime()
+  );
+}
+
 // ============================================================
 // CONSULTA AO AIRTABLE
 // ============================================================
@@ -804,10 +941,36 @@ function agruparPorClienteEOS(
   const ignorarData =
     opcoes.ignorarData === true;
 
+  const modoAuditoria =
+    opcoes.modoAuditoria === true;
+
+  // O corte só pode ser ignorado quando a chamada declara
+  // explicitamente que é uma auditoria.
+  //
+  // Portanto, ignorarData=true em um fluxo operacional não
+  // permite o envio de histórico anterior à automação.
+  const ignorarCorteAutomacao =
+    modoAuditoria &&
+    opcoes.ignorarCorteAutomacao === true;
+
   const agora =
     opcoes.agora instanceof Date
       ? opcoes.agora
       : new Date();
+
+  const inicioAutomacao =
+    validarInicioAutomacaoConfigurado();
+
+  if (
+    !ignorarCorteAutomacao &&
+    !inicioAutomacao.ok
+  ) {
+    throw new Error(
+      `${inicioAutomacao.mensagem} ` +
+      'O processamento foi interrompido para ' +
+      'impedir envios retroativos.'
+    );
+  }
 
   const clientes = new Map();
 
@@ -840,15 +1003,34 @@ function agruparPorClienteEOS(
       continue;
     }
 
-    // Normalmente, somente atualizações
-    // ocorridas ontem são processadas.
+    const valorDataAtualizacao =
+      lerCampo(
+        campos,
+        CAMPOS.dataAtualizacao
+      );
+
+    // Trava definitiva contra histórico anterior à entrada
+    // oficial da automação.
+    //
+    // Mesmo uma execução operacional com ignorarData=true
+    // continua submetida a este corte.
+    if (
+      !ignorarCorteAutomacao &&
+      !ehPosteriorOuIgualAoInicioAutomacao(
+        valorDataAtualizacao,
+        inicioAutomacao.data
+      )
+    ) {
+      continue;
+    }
+
+    // Normalmente, somente atualizações ocorridas ontem são
+    // processadas. ignorarData remove apenas este filtro de
+    // calendário; não remove a trava de início da automação.
     if (
       !ignorarData &&
       !ehDeOntem(
-        lerCampo(
-          campos,
-          CAMPOS.dataAtualizacao
-        ),
+        valorDataAtualizacao,
         agora
       )
     ) {
@@ -1150,10 +1332,7 @@ function agruparPorClienteEOS(
 
       dataAtualizacao:
         texto(
-          lerCampo(
-            campos,
-            CAMPOS.dataAtualizacao
-          )
+          valorDataAtualizacao
         ),
     };
 
@@ -1297,9 +1476,13 @@ module.exports = {
   separarTelefones,
 
   dataCalendarioDoValor,
+  instanteDoValor,
   ehDeOntem,
+  ehPosteriorOuIgualAoInicioAutomacao,
+  validarInicioAutomacaoConfigurado,
 
   CAMPOS,
   STATUS_PERMITIDOS,
   TIMEZONE,
+  AUTOMACAO_INICIO_EM,
 };

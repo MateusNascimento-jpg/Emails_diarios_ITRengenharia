@@ -3,13 +3,33 @@
 // ============================================================
 // previsualizar_whatsapp.js
 // ============================================================
+//
+// Este arquivo é exclusivamente de auditoria e pré-visualização.
+//
+// Ele não envia e-mails e não chama a Meta.
+//
+// Regras:
+//
+// npm run preview:whatsapp
+// - respeita o marco AUTOMACAO_INICIO_EM;
+// - considera somente atualizações de ontem.
+//
+// npm run preview:whatsapp:tudo
+// - ignora o filtro de ontem;
+// - ignora o marco AUTOMACAO_INICIO_EM;
+// - consulta o histórico apenas para auditoria;
+// - nunca transforma o histórico em fila de envio.
+// ============================================================
 
-require('dotenv').config();
+require('dotenv').config({
+  quiet: true,
+});
 
 const {
   buscarResumoDiario,
   STATUS_PERMITIDOS,
   TIMEZONE,
+  AUTOMACAO_INICIO_EM,
 } = require('./airtable.js');
 
 const {
@@ -33,6 +53,22 @@ const SAIDA_JSON =
 
 const MOSTRAR_ITENS =
   !ARGUMENTOS.has('--sem-itens');
+
+// Este arquivo já é, por definição, uma ferramenta de
+// auditoria.
+//
+// O corte da automação somente será ignorado quando também
+// houver --ignorar-data.
+//
+// Assim:
+//
+// preview:whatsapp
+// respeita o corte.
+//
+// preview:whatsapp:tudo
+// acessa o histórico para teste e auditoria.
+const IGNORAR_CORTE_AUTOMACAO =
+  IGNORAR_DATA;
 
 // ============================================================
 // FUNÇÕES AUXILIARES
@@ -301,8 +337,17 @@ function gerarRelatorio(
     timezone:
       TIMEZONE,
 
+    modoAuditoria:
+      true,
+
     ignorarData:
       IGNORAR_DATA,
+
+    ignorarCorteAutomacao:
+      IGNORAR_CORTE_AUTOMACAO,
+
+    inicioAutomacao:
+      AUTOMACAO_INICIO_EM || null,
 
     statusPermitidos:
       STATUS_PERMITIDOS,
@@ -375,10 +420,29 @@ function mostrarCabecalho(
   );
 
   console.log(
+    'Modo: AUDITORIA — nenhum envio será realizado'
+  );
+
+  console.log(
     `Filtro de data: ${
       relatorio.ignorarData
         ? 'IGNORADO'
         : 'somente atualizações de ontem'
+    }`
+  );
+
+  console.log(
+    `Marco da automação: ${
+      relatorio.inicioAutomacao ||
+      '(não configurado)'
+    }`
+  );
+
+  console.log(
+    `Corte da automação: ${
+      relatorio.ignorarCorteAutomacao
+        ? 'IGNORADO SOMENTE NESTA AUDITORIA HISTÓRICA'
+        : 'ATIVO'
     }`
   );
 
@@ -642,7 +706,7 @@ function mostrarRodape(
 
     if (!IGNORAR_DATA) {
       console.log(
-        'Para verificar todos os registros com status permitido, execute:'
+        'Para auditar todo o histórico com status permitido, execute:'
       );
 
       console.log(
@@ -661,6 +725,18 @@ function mostrarRodape(
     console.log(
       'Nenhuma chamada foi realizada para a Meta.'
     );
+
+    if (
+      relatorio.ignorarCorteAutomacao
+    ) {
+      console.log(
+        'ATENÇÃO: o histórico apareceu somente porque esta execução é uma auditoria.'
+      );
+
+      console.log(
+        'Esses registros não poderão entrar em uma execução operacional.'
+      );
+    }
   }
 
   console.log(
@@ -679,6 +755,12 @@ async function executar() {
     await buscarResumoDiario({
       ignorarData:
         IGNORAR_DATA,
+
+      modoAuditoria:
+        true,
+
+      ignorarCorteAutomacao:
+        IGNORAR_CORTE_AUTOMACAO,
     });
 
   const relatorio =
