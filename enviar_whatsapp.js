@@ -8,13 +8,14 @@
 // 1. Receber um cliente e uma Ordem de Serviço já agrupada.
 // 2. Escolher o telefone real ou o telefone controlado de teste.
 // 3. Normalizar o telefone para o padrão internacional.
-// 4. Bloquear números proibidos, inclusive o WhatsApp principal.
-// 5. Gerar o payload pelo whatsapp_template.js.
-// 6. Simular o envio enquanto a integração estiver desativada.
-// 7. Enviar o template pela Meta Cloud API.
-// 8. Aplicar timeout e tentativas controladas.
-// 9. Nunca expor o token nos logs.
-// 10. Retornar um resultado estruturado para enviar_todos.js.
+// 4. Validar a segurança do contato consolidado pelo Airtable.
+// 5. Bloquear números proibidos, inclusive o WhatsApp principal.
+// 6. Gerar o payload pelo whatsapp_template.js.
+// 7. Simular o envio enquanto a integração estiver desativada.
+// 8. Enviar o template pela Meta Cloud API.
+// 9. Aplicar timeout e tentativas controladas.
+// 10. Nunca expor o token nos logs.
+// 11. Retornar um resultado estruturado para enviar_todos.js.
 //
 // Regra definitiva:
 //
@@ -272,6 +273,103 @@ function dividirLista(valor) {
     .filter(Boolean);
 }
 
+function valorEhVerdadeiro(valor) {
+  if (valor === true) {
+    return true;
+  }
+
+  if (
+    valor === false ||
+    valor === null ||
+    valor === undefined
+  ) {
+    return false;
+  }
+
+  return [
+    '1',
+    'true',
+    'sim',
+    'yes',
+    'on',
+  ].includes(
+    limparTexto(valor)
+      .toLowerCase()
+  );
+}
+
+function valorEhFalsoExplicito(
+  valor
+) {
+  if (valor === false) {
+    return true;
+  }
+
+  if (
+    valor === true ||
+    valor === null ||
+    valor === undefined ||
+    limparTexto(valor) === ''
+  ) {
+    return false;
+  }
+
+  return [
+    '0',
+    'false',
+    'nao',
+    'não',
+    'no',
+    'off',
+  ].includes(
+    limparTexto(valor)
+      .toLowerCase()
+  );
+}
+
+function listaNormalizada(
+  valor
+) {
+  const itens =
+    Array.isArray(valor)
+      ? valor
+      : (
+          valor instanceof Set
+            ? [...valor]
+            : dividirLista(valor)
+        );
+
+  return [
+    ...new Set(
+      itens
+        .map(item =>
+          limparTexto(item)
+        )
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function normalizarMotivo(
+  valor
+) {
+  return limparTexto(valor)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(
+      /[\u0300-\u036f]/g,
+      ''
+    )
+    .replace(
+      /[^a-z0-9]+/g,
+      '-'
+    )
+    .replace(
+      /^-+|-+$/g,
+      ''
+    );
+}
+
 // ============================================================
 // NORMALIZAÇÃO DO TELEFONE
 // ============================================================
@@ -351,6 +449,312 @@ function normalizarTelefone(
 }
 
 // ============================================================
+// BLINDAGEM DO CONTATO CONSOLIDADO PELO AIRTABLE
+// ============================================================
+
+function validarSegurancaWhatsappCliente(
+  cliente,
+  {
+    modoTeste =
+      CONFIG.modoTeste,
+  } = {}
+) {
+  if (!cliente) {
+    return {
+      ok: false,
+
+      motivo:
+        'cliente-ausente',
+
+      mensagem:
+        'Não foi possível validar o contato sem o cliente.',
+    };
+  }
+
+  const motivosOriginais =
+    listaNormalizada(
+      cliente
+        ?.whatsappMotivosBloqueio
+    );
+
+  const motivosNormalizados =
+    new Set(
+      motivosOriginais.map(
+        normalizarMotivo
+      )
+    );
+
+  const whatsappsEncontrados =
+    listaNormalizada(
+      cliente
+        ?.whatsappsEncontrados
+    );
+
+  const numerosMascarados =
+    whatsappsEncontrados.map(
+      mascararTelefone
+    );
+
+  const respostaBase = {
+    clienteId:
+      cliente?.clienteId || '',
+
+    clienteNome:
+      cliente?.clienteNome || '',
+
+    motivosOriginais,
+
+    quantidadeNumerosEncontrados:
+      whatsappsEncontrados.length,
+
+    numerosMascarados,
+  };
+
+  const marcadoComoBloqueado =
+    valorEhVerdadeiro(
+      cliente
+        ?.whatsappBloqueado
+    ) ||
+    motivosNormalizados.has(
+      'numero-bloqueado'
+    ) ||
+    motivosNormalizados.has(
+      'whatsapp-bloqueado'
+    );
+
+  if (marcadoComoBloqueado) {
+    return {
+      ok: false,
+
+      motivo:
+        'numero-bloqueado-no-airtable',
+
+      mensagem:
+        'O contato do cliente foi marcado como bloqueado ' +
+        'durante a consolidação do Airtable.',
+
+      ...respostaBase,
+    };
+  }
+
+  const numeroCompartilhado =
+    valorEhVerdadeiro(
+      cliente
+        ?.whatsappDuplicadoEntreClientes
+    ) ||
+    motivosNormalizados.has(
+      'numero-compartilhado-entre-clientes'
+    ) ||
+    motivosNormalizados.has(
+      'whatsapp-compartilhado'
+    );
+
+  if (numeroCompartilhado) {
+    return {
+      ok: false,
+
+      motivo:
+        'numero-compartilhado-entre-clientes',
+
+      mensagem:
+        'O mesmo número foi associado a mais de um cliente. ' +
+        'O envio foi bloqueado para evitar destinatário incorreto.',
+
+      clientesComMesmoWhatsapp:
+        listaNormalizada(
+          cliente
+            ?.clientesComMesmoWhatsapp
+        ),
+
+      ...respostaBase,
+    };
+  }
+
+  const contatoAmbiguo =
+    valorEhVerdadeiro(
+      cliente
+        ?.whatsappAmbiguo
+    ) ||
+    whatsappsEncontrados.length > 1 ||
+    motivosNormalizados.has(
+      'cliente-com-mais-de-um-whatsapp'
+    ) ||
+    motivosNormalizados.has(
+      'mais-de-um-whatsapp'
+    ) ||
+    motivosNormalizados.has(
+      'whatsapp-ambiguo'
+    );
+
+  if (contatoAmbiguo) {
+    return {
+      ok: false,
+
+      motivo:
+        'cliente-com-mais-de-um-whatsapp',
+
+      mensagem:
+        'O cliente possui contato ambíguo ou mais de um ' +
+        'número consolidado no Airtable.',
+
+      ...respostaBase,
+    };
+  }
+
+  const contatoMarcadoInvalido =
+    valorEhVerdadeiro(
+      cliente
+        ?.whatsappInvalido
+    ) ||
+    valorEhVerdadeiro(
+      cliente
+        ?.telefoneInvalido
+    ) ||
+    valorEhFalsoExplicito(
+      cliente
+        ?.whatsappValido
+    ) ||
+    motivosNormalizados.has(
+      'telefone-invalido'
+    ) ||
+    motivosNormalizados.has(
+      'whatsapp-invalido'
+    ) ||
+    motivosNormalizados.has(
+      'whatsapp-cliente-invalido'
+    );
+
+  if (contatoMarcadoInvalido) {
+    return {
+      ok: false,
+
+      motivo:
+        'whatsapp-cliente-invalido',
+
+      mensagem:
+        'O contato do cliente foi marcado como inválido ' +
+        'durante a consolidação do Airtable.',
+
+      ...respostaBase,
+    };
+  }
+
+  const telefoneCliente =
+    limparTexto(
+      cliente?.whatsapp
+    );
+
+  if (telefoneCliente) {
+    const normalizado =
+      normalizarTelefone(
+        telefoneCliente
+      );
+
+    if (!normalizado.ok) {
+      return {
+        ok: false,
+
+        motivo:
+          'whatsapp-cliente-invalido',
+
+        mensagem:
+          'O telefone consolidado do cliente não pôde ' +
+          'ser normalizado para o padrão internacional.',
+
+        telefoneMascarado:
+          mascararTelefone(
+            telefoneCliente
+          ),
+
+        ...respostaBase,
+      };
+    }
+
+    if (
+      telefoneEstaBloqueado(
+        normalizado.telefone
+      )
+    ) {
+      return {
+        ok: false,
+
+        motivo:
+          'numero-bloqueado',
+
+        mensagem:
+          'O telefone consolidado do cliente está presente ' +
+          'em WHATSAPP_NUMEROS_BLOQUEADOS.',
+
+        telefoneMascarado:
+          mascararTelefone(
+            normalizado.telefone
+          ),
+
+        ...respostaBase,
+      };
+    }
+  }
+
+  const marcadoComoInseguro =
+    valorEhFalsoExplicito(
+      cliente
+        ?.whatsappSeguroParaEnvio
+    );
+
+  if (marcadoComoInseguro) {
+    return {
+      ok: false,
+
+      motivo:
+        'whatsapp-inseguro-para-envio',
+
+      mensagem:
+        'O Airtable marcou o contato como não seguro ' +
+        'para envio de WhatsApp.',
+
+      ...respostaBase,
+    };
+  }
+
+  // No modo de teste, o destino é WHATSAPP_TEST_NUMBER.
+  // Mesmo assim, todos os bloqueios explícitos acima continuam
+  // sendo respeitados. A única concessão é permitir que um
+  // objeto legado, sem whatsapp e sem flag explícita de risco,
+  // utilize o número controlado de teste.
+  if (
+    !modoTeste &&
+    !telefoneCliente
+  ) {
+    return {
+      ok: false,
+
+      motivo:
+        'cliente-sem-whatsapp',
+
+      mensagem:
+        'O Airtable não retornou um número único e seguro ' +
+        'para este cliente.',
+
+      ...respostaBase,
+    };
+  }
+
+  return {
+    ok: true,
+
+    motivo:
+      '',
+
+    mensagem:
+      '',
+
+    telefoneCliente,
+
+    ...respostaBase,
+  };
+}
+
+// ============================================================
 // NÚMEROS BLOQUEADOS
 // ============================================================
 
@@ -389,6 +793,15 @@ function telefoneEstaBloqueado(
 function escolherTelefoneDestino(
   cliente
 ) {
+  const segurancaCliente =
+    validarSegurancaWhatsappCliente(
+      cliente
+    );
+
+  if (!segurancaCliente.ok) {
+    return segurancaCliente;
+  }
+
   if (CONFIG.modoTeste) {
     if (!CONFIG.numeroTeste) {
       return {
@@ -419,8 +832,10 @@ function escolherTelefoneDestino(
           'WHATSAPP_TEST_NUMBER não possui ' +
           'um telefone internacional válido.',
 
-        original:
-          CONFIG.numeroTeste,
+        telefoneMascarado:
+          mascararTelefone(
+            CONFIG.numeroTeste
+          ),
       };
     }
 
@@ -435,28 +850,8 @@ function escolherTelefoneDestino(
 
       telefoneOriginal:
         CONFIG.numeroTeste,
-    };
-  }
 
-  if (
-    cliente?.whatsappAmbiguo === true
-  ) {
-    return {
-      ok: false,
-
-      motivo:
-        'cliente-com-mais-de-um-whatsapp',
-
-      mensagem:
-        'O Airtable retornou mais de um ' +
-        'número para o mesmo cliente.',
-
-      numeros:
-        Array.isArray(
-          cliente?.whatsappsEncontrados
-        )
-          ? cliente.whatsappsEncontrados
-          : [],
+      segurancaCliente,
     };
   }
 
@@ -465,6 +860,8 @@ function escolherTelefoneDestino(
       cliente?.whatsapp
     );
 
+  // Defesa redundante: a validação anterior já bloqueia
+  // cliente sem número fora do modo de teste.
   if (!telefoneCliente) {
     return {
       ok: false,
@@ -474,7 +871,7 @@ function escolherTelefoneDestino(
 
       mensagem:
         'O Airtable não retornou um número ' +
-        'único para este cliente.',
+        'único e seguro para este cliente.',
     };
   }
 
@@ -483,6 +880,9 @@ function escolherTelefoneDestino(
       telefoneCliente
     );
 
+  // Defesa redundante: a validação anterior já bloqueia
+  // telefone inválido, mas esta verificação protege o uso
+  // direto desta função em integrações futuras.
   if (!normalizado.ok) {
     return {
       ok: false,
@@ -494,8 +894,10 @@ function escolherTelefoneDestino(
         'O telefone do cliente vindo do ' +
         'Airtable não pôde ser normalizado.',
 
-      original:
-        telefoneCliente,
+      telefoneMascarado:
+        mascararTelefone(
+          telefoneCliente
+        ),
     };
   }
 
@@ -510,6 +912,8 @@ function escolherTelefoneDestino(
 
     telefoneOriginal:
       telefoneCliente,
+
+    segurancaCliente,
   };
 }
 
@@ -1592,6 +1996,7 @@ module.exports = {
   prepararEnvioWhatsAppDaOS,
 
   normalizarTelefone,
+  validarSegurancaWhatsappCliente,
   escolherTelefoneDestino,
   telefoneEstaBloqueado,
 

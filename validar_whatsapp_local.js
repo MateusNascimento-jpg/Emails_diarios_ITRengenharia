@@ -1,39 +1,55 @@
 'use strict';
 
-// Validação local segura: não consulta Airtable, não envia e-mail
-// e não chama a Meta.
+// ============================================================
+// validar_whatsapp_local.js
+// ============================================================
+//
+// Validação local segura do template e das blindagens do canal.
+//
+// Este arquivo:
+//
+// - NÃO consulta o Airtable;
+// - NÃO envia e-mails;
+// - NÃO chama a Meta;
+// - NÃO utiliza dados reais de clientes;
+// - NÃO altera o .env;
+// - NÃO grava arquivos.
+//
+// As variáveis abaixo são fixadas antes dos requires para que
+// o teste não herde destinos ou credenciais reais do ambiente.
+// ============================================================
 
-process.env.WHATSAPP_TEMPLATE_NAME ||=
+process.env.WHATSAPP_TEMPLATE_NAME =
   'atualizacao_ordem_servico';
 
-process.env.WHATSAPP_TEMPLATE_LANGUAGE ||=
+process.env.WHATSAPP_TEMPLATE_LANGUAGE =
   'pt_BR';
 
-process.env.WHATSAPP_TEMPLATE_PARAMETER_MODE ||=
+process.env.WHATSAPP_TEMPLATE_PARAMETER_MODE =
   'named';
 
-process.env.WHATSAPP_TEMPLATE_BODY_PARAMETERS ||=
+process.env.WHATSAPP_TEMPLATE_BODY_PARAMETERS =
   'ordem_servico,detalhes';
 
-process.env.WHATSAPP_FORMATO_DETALHES ||=
+process.env.WHATSAPP_FORMATO_DETALHES =
   'auto';
 
-process.env.WHATSAPP_DETALHES_MAX_CHARS ||=
+process.env.WHATSAPP_DETALHES_MAX_CHARS =
   '800';
 
-process.env.WHATSAPP_TEMPLATE_BODY_MAX_CHARS ||=
+process.env.WHATSAPP_TEMPLATE_BODY_MAX_CHARS =
   '1024';
 
-process.env.WHATSAPP_TEMPLATE_BODY_FIXED_CHARS ||=
+process.env.WHATSAPP_TEMPLATE_BODY_FIXED_CHARS =
   '306';
 
-process.env.WHATSAPP_TEMPLATE_BODY_SAFETY_MARGIN ||=
+process.env.WHATSAPP_TEMPLATE_BODY_SAFETY_MARGIN =
   '20';
 
-process.env.WHATSAPP_TEMPLATE_HEADER_TYPE ||=
+process.env.WHATSAPP_TEMPLATE_HEADER_TYPE =
   'image';
 
-process.env.WHATSAPP_TEMPLATE_HEADER_MEDIA_URL ||=
+process.env.WHATSAPP_TEMPLATE_HEADER_MEDIA_URL =
   'https://emails-diarios-itrengenharia.onrender.com/assets/logo-whatsapp.jpeg';
 
 process.env.WHATSAPP_ATIVO =
@@ -45,14 +61,25 @@ process.env.WHATSAPP_SIMULAR =
 process.env.WHATSAPP_MODO_TESTE =
   'true';
 
-process.env.WHATSAPP_TEST_NUMBER ||=
+// Número totalmente fictício usado como destino controlado.
+process.env.WHATSAPP_TEST_NUMBER =
   '5561999999999';
 
-process.env.WHATSAPP_PHONE_NUMBER_ID ||=
+process.env.WHATSAPP_PHONE_NUMBER_ID =
   '123456789012345';
 
-process.env.WHATSAPP_ACCESS_TOKEN ||=
+process.env.WHATSAPP_ACCESS_TOKEN =
   'TOKEN_LOCAL_NAO_USADO';
+
+process.env.WHATSAPP_API_VERSION =
+  'v25.0';
+
+process.env.WHATSAPP_COUNTRY_CODE =
+  '55';
+
+// Número fictício usado para validar a lista de bloqueio.
+process.env.WHATSAPP_NUMEROS_BLOQUEADOS =
+  '5561988887777';
 
 const assert =
   require('node:assert/strict');
@@ -65,10 +92,17 @@ const {
 
 const {
   normalizarTelefone,
+  validarSegurancaWhatsappCliente,
   prepararEnvioWhatsAppDaOS,
 } = require('./enviar_whatsapp.js');
 
-function clienteBase() {
+// ============================================================
+// DADOS FICTÍCIOS
+// ============================================================
+
+function clienteBase(
+  alteracoes = {}
+) {
   return {
     clienteId:
       'cliente-teste',
@@ -78,6 +112,51 @@ function clienteBase() {
 
     whatsapp:
       '61999999999',
+
+    whatsappsEncontrados: [
+      '5561999999999',
+    ],
+
+    whatsappAmbiguo:
+      false,
+
+    whatsappBloqueado:
+      false,
+
+    whatsappDuplicadoEntreClientes:
+      false,
+
+    whatsappSeguroParaEnvio:
+      true,
+
+    whatsappMotivosBloqueio:
+      [],
+
+    clientesComMesmoWhatsapp:
+      [],
+
+    ...alteracoes,
+  };
+}
+
+function ordemBase(
+  alteracoes = {}
+) {
+  return {
+    osId:
+      'os-preparacao',
+
+    osNome:
+      'OS PREPARAÇÃO',
+
+    linhas: [
+      linha({
+        amostra:
+          'A-01',
+      }),
+    ],
+
+    ...alteracoes,
   };
 }
 
@@ -124,6 +203,24 @@ function parametroNomeado(
       nome
   );
 }
+
+function prepararComCliente(
+  alteracoesCliente = {}
+) {
+  return prepararEnvioWhatsAppDaOS({
+    cliente:
+      clienteBase(
+        alteracoesCliente
+      ),
+
+    ordem:
+      ordemBase(),
+  });
+}
+
+// ============================================================
+// TESTE 1 — TEMPLATE DE MENSAGEM PEQUENA
+// ============================================================
 
 function validarMensagemPequena() {
   const ordem = {
@@ -286,6 +383,10 @@ function validarMensagemPequena() {
   );
 }
 
+// ============================================================
+// TESTE 2 — DEDUPLICAÇÃO
+// ============================================================
+
 function validarDeduplicacao() {
   const item =
     linha({
@@ -323,6 +424,10 @@ function validarDeduplicacao() {
     1
   );
 }
+
+// ============================================================
+// TESTE 3 — FALLBACK OU BLOQUEIO POR TAMANHO
+// ============================================================
 
 function validarFallbackCompactoOuBloqueioSeguro() {
   const linhas =
@@ -389,6 +494,10 @@ function validarFallbackCompactoOuBloqueioSeguro() {
   );
 }
 
+// ============================================================
+// TESTE 4 — NORMALIZAÇÃO DO TELEFONE
+// ============================================================
+
 function validarTelefone() {
   const nacional =
     normalizarTelefone(
@@ -416,27 +525,34 @@ function validarTelefone() {
   );
 }
 
+// ============================================================
+// TESTE 5 — CONTATO SEGURO
+// ============================================================
+
+function validarContatoSeguro() {
+  const resultado =
+    validarSegurancaWhatsappCliente(
+      clienteBase()
+    );
+
+  assert.equal(
+    resultado.ok,
+    true
+  );
+
+  assert.equal(
+    resultado.quantidadeNumerosEncontrados,
+    1
+  );
+}
+
+// ============================================================
+// TESTE 6 — PREPARAÇÃO EM MODO DE TESTE
+// ============================================================
+
 function validarPreparacao() {
   const resultado =
-    prepararEnvioWhatsAppDaOS({
-      cliente:
-        clienteBase(),
-
-      ordem: {
-        osId:
-          'os-preparacao',
-
-        osNome:
-          'OS PREPARAÇÃO',
-
-        linhas: [
-          linha({
-            amostra:
-              'A-01',
-          }),
-        ],
-      },
-    });
+    prepararComCliente();
 
   assert.equal(
     resultado.ok,
@@ -459,6 +575,254 @@ function validarPreparacao() {
   );
 }
 
+// ============================================================
+// TESTE 7 — whatsappSeguroParaEnvio=false
+// ============================================================
+
+function validarBloqueioContatoInseguro() {
+  const resultado =
+    prepararComCliente({
+      whatsappSeguroParaEnvio:
+        false,
+    });
+
+  assert.equal(
+    resultado.ok,
+    false
+  );
+
+  assert.equal(
+    resultado.motivo,
+    'whatsapp-inseguro-para-envio'
+  );
+}
+
+// ============================================================
+// TESTE 8 — FLAG whatsappBloqueado
+// ============================================================
+
+function validarBloqueioMarcadoNoAirtable() {
+  const resultado =
+    prepararComCliente({
+      whatsappBloqueado:
+        true,
+
+      whatsappMotivosBloqueio: [
+        'numero-bloqueado',
+      ],
+    });
+
+  assert.equal(
+    resultado.ok,
+    false
+  );
+
+  assert.equal(
+    resultado.motivo,
+    'numero-bloqueado-no-airtable'
+  );
+}
+
+// ============================================================
+// TESTE 9 — NÚMERO COMPARTILHADO ENTRE CLIENTES
+// ============================================================
+
+function validarBloqueioNumeroCompartilhado() {
+  const resultado =
+    prepararComCliente({
+      whatsappDuplicadoEntreClientes:
+        true,
+
+      whatsappAmbiguo:
+        true,
+
+      whatsappSeguroParaEnvio:
+        false,
+
+      whatsappMotivosBloqueio: [
+        'numero-compartilhado-entre-clientes',
+      ],
+
+      clientesComMesmoWhatsapp: [
+        'Cliente A',
+        'Cliente B',
+      ],
+    });
+
+  assert.equal(
+    resultado.ok,
+    false
+  );
+
+  assert.equal(
+    resultado.motivo,
+    'numero-compartilhado-entre-clientes'
+  );
+
+  assert.equal(
+    resultado.clientesComMesmoWhatsapp.length,
+    2
+  );
+}
+
+// ============================================================
+// TESTE 10 — CONTATO AMBÍGUO
+// ============================================================
+
+function validarBloqueioContatoAmbiguo() {
+  const resultado =
+    prepararComCliente({
+      whatsappAmbiguo:
+        true,
+
+      whatsappsEncontrados: [
+        '5561999999999',
+        '5561977776666',
+      ],
+
+      whatsappSeguroParaEnvio:
+        false,
+
+      whatsappMotivosBloqueio: [
+        'cliente-com-mais-de-um-whatsapp',
+      ],
+    });
+
+  assert.equal(
+    resultado.ok,
+    false
+  );
+
+  assert.equal(
+    resultado.motivo,
+    'cliente-com-mais-de-um-whatsapp'
+  );
+
+  assert.equal(
+    resultado.quantidadeNumerosEncontrados,
+    2
+  );
+
+  assert.equal(
+    Array.isArray(
+      resultado.numerosMascarados
+    ),
+    true
+  );
+
+  assert.equal(
+    Object.hasOwn(
+      resultado,
+      'numeros'
+    ),
+    false
+  );
+}
+
+// ============================================================
+// TESTE 11 — CONTATO MARCADO COMO INVÁLIDO
+// ============================================================
+
+function validarBloqueioContatoInvalido() {
+  const resultado =
+    prepararComCliente({
+      whatsappInvalido:
+        true,
+
+      whatsappSeguroParaEnvio:
+        false,
+
+      whatsappMotivosBloqueio: [
+        'telefone-invalido',
+      ],
+    });
+
+  assert.equal(
+    resultado.ok,
+    false
+  );
+
+  assert.equal(
+    resultado.motivo,
+    'whatsapp-cliente-invalido'
+  );
+}
+
+// ============================================================
+// TESTE 12 — LISTA WHATSAPP_NUMEROS_BLOQUEADOS
+// ============================================================
+
+function validarBloqueioPorListaDoAmbiente() {
+  const resultado =
+    prepararComCliente({
+      whatsapp:
+        '61988887777',
+
+      whatsappsEncontrados: [
+        '5561988887777',
+      ],
+
+      whatsappSeguroParaEnvio:
+        true,
+    });
+
+  assert.equal(
+    resultado.ok,
+    false
+  );
+
+  assert.equal(
+    resultado.motivo,
+    'numero-bloqueado'
+  );
+
+  assert.match(
+    resultado.telefoneMascarado || '',
+    /\*/
+  );
+
+  assert.equal(
+    JSON.stringify(resultado)
+      .includes(
+        '5561988887777'
+      ),
+    false,
+    'O resultado de bloqueio não deve expor o número completo.'
+  );
+}
+
+// ============================================================
+// TESTE 13 — CLIENTE LEGADO SEM NÚMERO NO MODO DE TESTE
+// ============================================================
+
+function validarCompatibilidadeModoTeste() {
+  const resultado =
+    prepararComCliente({
+      whatsapp:
+        '',
+
+      whatsappsEncontrados:
+        [],
+
+      whatsappSeguroParaEnvio:
+        undefined,
+    });
+
+  assert.equal(
+    resultado.ok,
+    true
+  );
+
+  assert.equal(
+    resultado.origemDestino,
+    'teste'
+  );
+}
+
+// ============================================================
+// TESTE 14 — NORMALIZAÇÃO DO TEXTO DA META
+// ============================================================
+
 function validarNormalizacao() {
   const valor =
     normalizarParametroMeta(
@@ -471,16 +835,32 @@ function validarNormalizacao() {
   );
 }
 
+// ============================================================
+// EXECUÇÃO
+// ============================================================
+
 function executar() {
   validarMensagemPequena();
   validarDeduplicacao();
   validarFallbackCompactoOuBloqueioSeguro();
   validarTelefone();
+  validarContatoSeguro();
   validarPreparacao();
+  validarBloqueioContatoInseguro();
+  validarBloqueioMarcadoNoAirtable();
+  validarBloqueioNumeroCompartilhado();
+  validarBloqueioContatoAmbiguo();
+  validarBloqueioContatoInvalido();
+  validarBloqueioPorListaDoAmbiente();
+  validarCompatibilidadeModoTeste();
   validarNormalizacao();
 
   console.log(
     'VALIDAÇÃO WHATSAPP: OK'
+  );
+
+  console.log(
+    'TESTES EXECUTADOS: 14'
   );
 
   console.log(
@@ -493,6 +873,18 @@ function executar() {
 
   console.log(
     'ENVIO DE E-MAIL: NÃO'
+  );
+
+  console.log(
+    'CONTATOS INSEGUROS: BLOQUEADOS'
+  );
+
+  console.log(
+    'NÚMEROS COMPARTILHADOS: BLOQUEADOS'
+  );
+
+  console.log(
+    'NÚMEROS PROIBIDOS: BLOQUEADOS'
   );
 }
 
@@ -510,4 +902,4 @@ try {
 
   process.exitCode =
     1;
-}
+} 
