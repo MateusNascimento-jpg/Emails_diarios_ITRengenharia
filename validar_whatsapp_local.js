@@ -332,28 +332,51 @@ function validarMensagemPequena() {
   );
 
   assert.match(
-    detalhes,
-    /Ensaio: CBR-N/
-  );
+  detalhes,
+  /◆ \*1\) Amostra:\*/
+);
 
-  assert.match(
-    detalhes,
-    /Status: Relatório Pronto/
-  );
+assert.match(
+  detalhes,
+  /\*Ensaio:\* CBR-N/
+);
 
-  assert.equal(
-    /[\r\n\t]/.test(
-      detalhes
-    ),
-    false
-  );
+assert.match(
+  detalhes,
+  /\*Status:\* Relatório Pronto/
+);
 
-  assert.equal(
-    detalhes.includes(
-      ' || '
-    ),
-    true
-  );
+// Uma linha em branco entre Amostra, Ensaio e Status.
+assert.match(
+  detalhes,
+  /\*1\) Amostra:\*[^\n]+\n\n\*Ensaio:\*/
+);
+
+assert.match(
+  detalhes,
+  /\*Ensaio:\*[^\n]+\n\n\*Status:\*/
+);
+
+// Duas linhas em branco entre uma amostra e outra.
+assert.match(
+  detalhes,
+  /\*Status:\*[^\n]+\n\n\n◆ \*2\) Amostra:\*/
+);
+
+assert.equal(
+  detalhes.includes('\r'),
+  false
+);
+
+assert.equal(
+  detalhes.includes('\t'),
+  false
+);
+
+assert.equal(
+  detalhes.includes(' || '),
+  false
+);
 
   const cabecalho =
     resultado.payload.template.components
@@ -836,7 +859,7 @@ function validarNormalizacao() {
 }
 
 // ============================================================
-// EXECUÇÃO
+// EXECUÇÃO DO SCRIPT FINAL
 // ============================================================
 
 function executar() {
@@ -857,7 +880,7 @@ function executar() {
 
   console.log(
     'VALIDAÇÃO WHATSAPP: OK'
-  );
+  );132974
 
   console.log(
     'TESTES EXECUTADOS: 14'

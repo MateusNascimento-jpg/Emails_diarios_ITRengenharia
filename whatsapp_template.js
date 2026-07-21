@@ -6,54 +6,28 @@
 
 require('dotenv').config();
 
-const {
-  statusExibido,
-} = require('./email_template.js');
+const { statusExibido } = require('./email_template.js');
 
 // ============================================================
 // CONFIGURAÇÃO
 // ============================================================
 
 function textoEnv(nome, padrao = '') {
-  return String(
-    process.env[nome] ?? padrao
-  ).trim();
+  return String(process.env[nome] ?? padrao).trim();
 }
 
-function numeroInteiroPositivo(
-  valor,
-  padrao
-) {
-  const numero = Number.parseInt(
-    String(valor ?? ''),
-    10
-  );
-
-  return Number.isInteger(numero) &&
-    numero > 0
-    ? numero
-    : padrao;
+function numeroInteiroPositivo(valor, padrao) {
+  const numero = Number.parseInt(String(valor ?? ''), 10);
+  return Number.isInteger(numero) && numero > 0 ? numero : padrao;
 }
 
-function numeroInteiroNaoNegativo(
-  valor,
-  padrao
-) {
-  const numero = Number.parseInt(
-    String(valor ?? ''),
-    10
-  );
-
-  return Number.isInteger(numero) &&
-    numero >= 0
-    ? numero
-    : padrao;
+function numeroInteiroNaoNegativo(valor, padrao) {
+  const numero = Number.parseInt(String(valor ?? ''), 10);
+  return Number.isInteger(numero) && numero >= 0 ? numero : padrao;
 }
 
 const CONFIG = Object.freeze({
-  templateName: textoEnv(
-    'WHATSAPP_TEMPLATE_NAME'
-  ),
+  templateName: textoEnv('WHATSAPP_TEMPLATE_NAME'),
 
   templateLanguage: textoEnv(
     'WHATSAPP_TEMPLATE_LANGUAGE',
@@ -70,35 +44,30 @@ const CONFIG = Object.freeze({
     'ordem_servico,detalhes'
   ),
 
-  // auto: tenta o formato individual e usa o compacto
-  // somente quando o corpo final não cabe no limite da Meta.
+  // auto: prioriza blocos; usa o compacto somente quando
+  // o corpo completo não cabe nos limites configurados.
   detailsFormat: textoEnv(
     'WHATSAPP_FORMATO_DETALHES',
     'auto'
   ).toLowerCase(),
 
-  // Limite adicional de segurança para a variável detalhes.
   detailsMaxChars: numeroInteiroPositivo(
     process.env.WHATSAPP_DETALHES_MAX_CHARS,
     800
   ),
 
-  // Limite do corpo final do template na Meta.
   templateBodyMaxChars: numeroInteiroPositivo(
     process.env.WHATSAPP_TEMPLATE_BODY_MAX_CHARS,
     1024
   ),
 
-  // Quantidade de caracteres fixos do corpo aprovado,
-  // sem contar os valores de {{ordem_servico}} e {{detalhes}}.
-  // Para o template atual, o texto base possui 335 caracteres;
-  // removendo os dois marcadores, restam 306 caracteres fixos.
+  // Mantido em 306 como estimativa conservadora, mesmo com
+  // a remoção dos asteriscos externos de {{detalhes}}.
   templateBodyFixedChars: numeroInteiroNaoNegativo(
     process.env.WHATSAPP_TEMPLATE_BODY_FIXED_CHARS,
     306
   ),
 
-  // Reserva preventiva para diferenças de normalização da Meta.
   templateBodySafetyMargin: numeroInteiroNaoNegativo(
     process.env.WHATSAPP_TEMPLATE_BODY_SAFETY_MARGIN,
     20
@@ -129,22 +98,15 @@ const CONFIG = Object.freeze({
     'WHATSAPP_TEMPLATE_HEADER_DOCUMENT_FILENAME'
   ),
 
-  buttons: textoEnv(
-    'WHATSAPP_TEMPLATE_BUTTONS'
-  ),
+  buttons: textoEnv('WHATSAPP_TEMPLATE_BUTTONS'),
 });
 
 // ============================================================
 // LIMPEZA E VALIDAÇÃO
 // ============================================================
 
-function limparTexto(
-  valor,
-  fallback = ''
-) {
-  const resultado = String(
-    valor ?? ''
-  )
+function limparTexto(valor, fallback = '') {
+  const resultado = String(valor ?? '')
     .replace(/\r\n|\r/g, '\n')
     .replace(/[\t ]+/g, ' ')
     .replace(/ *\n */g, '\n')
@@ -154,6 +116,11 @@ function limparTexto(
   return resultado || fallback;
 }
 
+// Normalização de uma linha.
+//
+// Mantém o comportamento legado para ordem de serviço,
+// cabeçalhos, botões e demais campos que não devem ter
+// quebras de linha.
 function normalizarParametroMeta(valor) {
   return String(valor ?? '')
     .replace(/\r\n|\r/g, '\n')
@@ -161,46 +128,50 @@ function normalizarParametroMeta(valor) {
       /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
       ' '
     )
-    .replace(
-      /[ \t]*\n+[ \t]*/g,
-      ' || '
-    )
+    .replace(/[ \t]*\n+[ \t]*/g, ' || ')
     .replace(/\t+/g, ' ')
-    .replace(
-      /(?:\s*\|\|\s*){2,}/g,
-      ' || '
-    )
-    .replace(
-      /\s*\|\|\s*/g,
-      ' || '
-    )
+    .replace(/(?:\s*\|\|\s*){2,}/g, ' || ')
+    .replace(/\s*\|\|\s*/g, ' || ')
     .replace(/ {2,}/g, ' ')
     .trim();
 }
 
+// Normalização própria para {{detalhes}}.
+//
+// Preserva:
+// - \n\n   → uma linha em branco;
+// - \n\n\n → duas linhas em branco.
+//
+// Quatro ou mais quebras consecutivas são reduzidas para três.
+function normalizarParametroMetaMultilinha(valor) {
+  return String(valor ?? '')
+    .replace(/\r\n|\r/g, '\n')
+    .replace(
+      /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
+      ' '
+    )
+    .replace(/\t+/g, ' ')
+    .split('\n')
+    .map(linha => linha.replace(/ {2,}/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim();
+}
+
 function contarCaracteres(valor) {
-  return Array.from(
-    String(valor ?? '')
-  ).length;
+  return Array.from(String(valor ?? '')).length;
 }
 
 function urlHttpsValida(valor) {
   try {
-    const url = new URL(
-      String(valor ?? '').trim()
-    );
-
-    return url.protocol === 'https:';
+    return new URL(String(valor ?? '').trim()).protocol === 'https:';
   } catch {
     return false;
   }
 }
 
 function garantirModoParametros(modo) {
-  if (
-    modo !== 'named' &&
-    modo !== 'positional'
-  ) {
+  if (modo !== 'named' && modo !== 'positional') {
     throw new Error(
       'WHATSAPP_TEMPLATE_PARAMETER_MODE deve ser ' +
       '"named" ou "positional".'
@@ -211,11 +182,7 @@ function garantirModoParametros(modo) {
 }
 
 function garantirFormatoDetalhes(formato) {
-  const permitidos = new Set([
-    'auto',
-    'blocos',
-    'compacto',
-  ]);
+  const permitidos = new Set(['auto', 'blocos', 'compacto']);
 
   if (!permitidos.has(formato)) {
     throw new Error(
@@ -251,9 +218,7 @@ function garantirTipoCabecalho(tipo) {
 // ============================================================
 
 function itensDaOS(ordem) {
-  const linhas = Array.isArray(
-    ordem?.linhas
-  )
+  const linhas = Array.isArray(ordem?.linhas)
     ? ordem.linhas
     : [];
 
@@ -261,18 +226,9 @@ function itensDaOS(ordem) {
   const itens = [];
 
   for (const linha of linhas) {
-    const amostra = limparTexto(
-      linha?.amostra,
-      '-'
-    );
-
-    const ensaioNome = limparTexto(
-      linha?.ensaioNome
-    );
-
-    const ensaioSigla = limparTexto(
-      linha?.ensaioSigla
-    );
+    const amostra = limparTexto(linha?.amostra, '-');
+    const ensaioNome = limparTexto(linha?.ensaioNome);
+    const ensaioSigla = limparTexto(linha?.ensaioSigla);
 
     const ensaio = limparTexto(
       ensaioNome || ensaioSigla,
@@ -280,27 +236,17 @@ function itensDaOS(ordem) {
     );
 
     const ensaioCurto = limparTexto(
-      ensaioSigla ||
-        ensaioNome ||
-        ensaio,
+      ensaioSigla || ensaioNome || ensaio,
       '-'
     );
 
     const status = limparTexto(
-      statusExibido(
-        linha?.status
-      ),
+      statusExibido(linha?.status),
       '-'
     );
 
-    const chave = [
-      amostra,
-      ensaio,
-      status,
-    ]
-      .map(item =>
-        item.toLowerCase()
-      )
+    const chave = [amostra, ensaio, status]
+      .map(item => item.toLowerCase())
       .join('|');
 
     if (vistos.has(chave)) {
@@ -316,14 +262,8 @@ function itensDaOS(ordem) {
       ensaioSigla,
       ensaioCurto,
       status,
-
-      recordId: limparTexto(
-        linha?.recordId
-      ),
-
-      idTrabalho: limparTexto(
-        linha?.idTrabalho
-      ),
+      recordId: limparTexto(linha?.recordId),
+      idTrabalho: limparTexto(linha?.idTrabalho),
     });
   }
 
@@ -334,22 +274,34 @@ function itensDaOS(ordem) {
 // FORMATOS DOS DETALHES
 // ============================================================
 
+// Formato visual aprovado:
+//
+// ◆ 1) Amostra: CP-01
+//
+// Ensaio: Granulometria
+//
+// Status: Relatório Pronto
+//
+//
+// ◆ 2) Amostra: CP-02
+//
+// ...
+//
+// Os asteriscos são enviados no valor da variável para deixar
+// somente os títulos em negrito.
 function detalhesEmBlocos(itens) {
   return itens
-    .map((item, indice) => (
-      `${indice + 1}) ` +
-      `Amostra: ${item.amostra} • ` +
-      `Ensaio: ${item.ensaioCurto} • ` +
-      `Status: ${item.status}`
-    ))
-    .join('\n');
+    .map(
+      (item, indice) =>
+        `◆ *${indice + 1}) Amostra:* ${item.amostra}\n\n` +
+        `*Ensaio:* ${item.ensaioCurto}\n\n` +
+        `*Status:* ${item.status}`
+    )
+    .join('\n\n\n');
 }
 
 function compactarPrefixoComum(valores) {
-  const lista = [...valores]
-    .map(valor =>
-      limparTexto(valor, '-')
-    );
+  const lista = [...valores].map(valor => limparTexto(valor, '-'));
 
   if (lista.length < 2) {
     return lista.join('; ');
@@ -358,52 +310,32 @@ function compactarPrefixoComum(valores) {
   let prefixo = lista[0];
 
   for (const valor of lista.slice(1)) {
-    while (
-      prefixo &&
-      !valor.startsWith(prefixo)
-    ) {
-      prefixo =
-        prefixo.slice(0, -1);
+    while (prefixo && !valor.startsWith(prefixo)) {
+      prefixo = prefixo.slice(0, -1);
     }
   }
 
-  const ultimoEspaco =
-    prefixo.lastIndexOf(' ');
+  const ultimoEspaco = prefixo.lastIndexOf(' ');
 
   if (ultimoEspaco < 3) {
     return lista.join('; ');
   }
 
-  prefixo = prefixo.slice(
-    0,
-    ultimoEspaco + 1
+  prefixo = prefixo.slice(0, ultimoEspaco + 1);
+
+  const rotulo = prefixo.trim();
+  const sufixos = lista.map(valor =>
+    valor.slice(prefixo.length).trim()
   );
 
-  const rotulo =
-    prefixo.trim();
-
-  const sufixos = lista.map(
-    valor =>
-      valor
-        .slice(prefixo.length)
-        .trim()
-  );
-
-  if (
-    !rotulo ||
-    sufixos.some(item => !item)
-  ) {
+  if (!rotulo || sufixos.some(item => !item)) {
     return lista.join('; ');
   }
 
-  const original =
-    lista.join('; ');
+  const original = lista.join('; ');
+  const compactado = `${rotulo} ${sufixos.join('; ')}`;
 
-  const compactado =
-    `${rotulo} ${sufixos.join('; ')}`;
-
-  return compactado.length <
-    original.length
+  return compactado.length < original.length
     ? compactado
     : original;
 }
@@ -413,39 +345,26 @@ function detalhesCompactos(itens) {
   const porEnsaio = new Map();
 
   for (const item of itens) {
-    const ensaioCurto =
-      limparTexto(
-        item.ensaioCurto ||
-          item.ensaioSigla ||
-          item.ensaioNome ||
-          item.ensaio,
-        '-'
-      );
+    const ensaioCurto = limparTexto(
+      item.ensaioCurto ||
+        item.ensaioSigla ||
+        item.ensaioNome ||
+        item.ensaio,
+      '-'
+    );
 
-    // Amostra + Status → Ensaios
+    // Amostra + status → ensaios.
     const chaveAmostra = [
       item.amostra,
       item.status,
     ].join('\u0000');
 
-    if (
-      !porAmostra.has(
-        chaveAmostra
-      )
-    ) {
-      porAmostra.set(
-        chaveAmostra,
-        {
-          amostra:
-            item.amostra,
-
-          status:
-            item.status,
-
-          ensaios:
-            new Set(),
-        }
-      );
+    if (!porAmostra.has(chaveAmostra)) {
+      porAmostra.set(chaveAmostra, {
+        amostra: item.amostra,
+        status: item.status,
+        ensaios: new Set(),
+      });
     }
 
     porAmostra
@@ -453,30 +372,18 @@ function detalhesCompactos(itens) {
       .ensaios
       .add(ensaioCurto);
 
-    // Ensaio + Status → Amostras
+    // Ensaio + status → amostras.
     const chaveEnsaio = [
       ensaioCurto,
       item.status,
     ].join('\u0000');
 
-    if (
-      !porEnsaio.has(
-        chaveEnsaio
-      )
-    ) {
-      porEnsaio.set(
-        chaveEnsaio,
-        {
-          ensaio:
-            ensaioCurto,
-
-          status:
-            item.status,
-
-          amostras:
-            new Set(),
-        }
-      );
+    if (!porEnsaio.has(chaveEnsaio)) {
+      porEnsaio.set(chaveEnsaio, {
+        ensaio: ensaioCurto,
+        status: item.status,
+        amostras: new Set(),
+      });
     }
 
     porEnsaio
@@ -485,61 +392,36 @@ function detalhesCompactos(itens) {
       .add(item.amostra);
   }
 
-  const textoPorAmostra = [
-    ...porAmostra.values(),
-  ]
-    .map(grupo => (
-      `${grupo.amostra}: ` +
-      `${[
-        ...grupo.ensaios,
-      ].join('; ')} ` +
-      `(${grupo.status})`
-    ))
+  const textoPorAmostra = [...porAmostra.values()]
+    .map(
+      grupo =>
+        `${grupo.amostra}: ` +
+        `${[...grupo.ensaios].join('; ')} ` +
+        `(${grupo.status})`
+    )
     .join('\n');
 
-  const secoesPorStatus =
-    new Map();
+  const secoesPorStatus = new Map();
 
-  for (
-    const grupo
-    of porEnsaio.values()
-  ) {
-    if (
-      !secoesPorStatus.has(
-        grupo.status
-      )
-    ) {
-      secoesPorStatus.set(
-        grupo.status,
-        []
-      );
+  for (const grupo of porEnsaio.values()) {
+    if (!secoesPorStatus.has(grupo.status)) {
+      secoesPorStatus.set(grupo.status, []);
     }
 
-    secoesPorStatus
-      .get(grupo.status)
-      .push(
-        `${grupo.ensaio}: ` +
-        `${
-          compactarPrefixoComum(
-            grupo.amostras
-          )
-        }`
-      );
+    secoesPorStatus.get(grupo.status).push(
+      `${grupo.ensaio}: ` +
+      `${compactarPrefixoComum(grupo.amostras)}`
+    );
   }
 
-  const textoPorEnsaio = [
-    ...secoesPorStatus.entries(),
-  ]
+  const textoPorEnsaio = [...secoesPorStatus.entries()]
     .map(
-      ([status, linhas]) => (
-        `Status: ${status}\n` +
-        linhas.join('\n')
-      )
+      ([status, linhas]) =>
+        `Status: ${status}\n${linhas.join('\n')}`
     )
     .join('\n\n');
 
-  return textoPorEnsaio.length <
-    textoPorAmostra.length
+  return textoPorEnsaio.length < textoPorAmostra.length
     ? textoPorEnsaio
     : textoPorAmostra;
 }
@@ -553,23 +435,15 @@ function estimarTamanhoCorpoFinal({
   detalhes,
 }) {
   const ordemNormalizada =
-    normalizarParametroMeta(
-      ordemServico
-    );
+    normalizarParametroMeta(ordemServico);
 
   const detalhesNormalizados =
-    normalizarParametroMeta(
-      detalhes
-    );
+    normalizarParametroMetaMultilinha(detalhes);
 
   return (
     CONFIG.templateBodyFixedChars +
-    contarCaracteres(
-      ordemNormalizada
-    ) +
-    contarCaracteres(
-      detalhesNormalizados
-    )
+    contarCaracteres(ordemNormalizada) +
+    contarCaracteres(detalhesNormalizados)
   );
 }
 
@@ -587,82 +461,47 @@ function candidatoDetalhes({
   ordemServico,
 }) {
   const textoNormalizado =
-    normalizarParametroMeta(
-      texto
-    );
+    normalizarParametroMetaMultilinha(texto);
 
   const tamanhoDetalhes =
-    contarCaracteres(
-      textoNormalizado
-    );
+    contarCaracteres(textoNormalizado);
 
   const tamanhoCorpoEstimado =
     estimarTamanhoCorpoFinal({
       ordemServico,
-      detalhes:
-        textoNormalizado,
+      detalhes: textoNormalizado,
     });
 
-  const limiteCorpo =
-    limiteEfetivoCorpo();
+  const limiteCorpo = limiteEfetivoCorpo();
 
   return {
-    formatoUsado:
-      formato,
-
-    texto:
-      textoNormalizado,
-
+    formatoUsado: formato,
+    texto: textoNormalizado,
     tamanhoDetalhes,
-
     tamanhoCorpoEstimado,
-
     limiteCorpo,
-
     cabeNoLimiteDetalhes:
-      tamanhoDetalhes <=
-      CONFIG.detailsMaxChars,
-
+      tamanhoDetalhes <= CONFIG.detailsMaxChars,
     cabeNoLimiteCorpo:
-      tamanhoCorpoEstimado <=
-      limiteCorpo,
+      tamanhoCorpoEstimado <= limiteCorpo,
   };
 }
 
-function escolherDetalhes(
-  itens,
-  ordemServico
-) {
+function escolherDetalhes(itens, ordemServico) {
   const formato =
-    garantirFormatoDetalhes(
-      CONFIG.detailsFormat
-    );
+    garantirFormatoDetalhes(CONFIG.detailsFormat);
 
-  const blocos =
-    candidatoDetalhes({
-      formato:
-        'blocos',
+  const blocos = candidatoDetalhes({
+    formato: 'blocos',
+    texto: detalhesEmBlocos(itens),
+    ordemServico,
+  });
 
-      texto:
-        detalhesEmBlocos(
-          itens
-        ),
-
-      ordemServico,
-    });
-
-  const compacto =
-    candidatoDetalhes({
-      formato:
-        'compacto',
-
-      texto:
-        detalhesCompactos(
-          itens
-        ),
-
-      ordemServico,
-    });
+  const compacto = candidatoDetalhes({
+    formato: 'compacto',
+    texto: detalhesCompactos(itens),
+    ordemServico,
+  });
 
   if (formato === 'blocos') {
     return blocos;
@@ -672,8 +511,6 @@ function escolherDetalhes(
     return compacto;
   }
 
-  // No modo automático, prioriza o formato individual.
-  // O compacto é usado somente quando necessário.
   if (
     blocos.cabeNoLimiteDetalhes &&
     blocos.cabeNoLimiteCorpo
@@ -688,186 +525,98 @@ function escolherDetalhes(
 // VARIÁVEIS INTERNAS DA OS
 // ============================================================
 
-function montarVariaveisDaOS(
-  cliente,
-  ordem
-) {
-  const itens =
-    itensDaOS(ordem);
+function montarVariaveisDaOS(cliente, ordem) {
+  const itens = itensDaOS(ordem);
 
   if (itens.length === 0) {
     return {
-      ok:
-        false,
-
-      motivo:
-        'os-sem-itens-validos',
-
-      clienteId:
-        cliente?.clienteId || '',
-
-      osId:
-        ordem?.osId || '',
+      ok: false,
+      motivo: 'os-sem-itens-validos',
+      clienteId: cliente?.clienteId || '',
+      osId: ordem?.osId || '',
     };
   }
 
-  const ordemServico =
-    limparTexto(
-      ordem?.osNome ||
-        ordem?.osId,
-      '-'
-    );
+  const ordemServico = limparTexto(
+    ordem?.osNome || ordem?.osId,
+    '-'
+  );
 
   const detalhesResultado =
-    escolherDetalhes(
-      itens,
-      ordemServico
-    );
+    escolherDetalhes(itens, ordemServico);
 
   if (
-    !detalhesResultado
-      .cabeNoLimiteDetalhes ||
-    !detalhesResultado
-      .cabeNoLimiteCorpo
+    !detalhesResultado.cabeNoLimiteDetalhes ||
+    !detalhesResultado.cabeNoLimiteCorpo
   ) {
     return {
-      ok:
-        false,
-
-      motivo:
-        'detalhes-excedem-limite',
-
-      limite:
-        CONFIG.detailsMaxChars,
-
-      limiteCorpo:
-        detalhesResultado
-          .limiteCorpo,
-
-      tamanho:
-        detalhesResultado
-          .tamanhoDetalhes,
-
+      ok: false,
+      motivo: 'detalhes-excedem-limite',
+      limite: CONFIG.detailsMaxChars,
+      limiteCorpo: detalhesResultado.limiteCorpo,
+      tamanho: detalhesResultado.tamanhoDetalhes,
       tamanhoCorpoEstimado:
-        detalhesResultado
-          .tamanhoCorpoEstimado,
-
-      formatoTentado:
-        detalhesResultado
-          .formatoUsado,
-
-      quantidadeItens:
-        itens.length,
-
-      clienteId:
-        cliente?.clienteId || '',
-
-      osId:
-        ordem?.osId || '',
-
+        detalhesResultado.tamanhoCorpoEstimado,
+      formatoTentado: detalhesResultado.formatoUsado,
+      quantidadeItens: itens.length,
+      clienteId: cliente?.clienteId || '',
+      osId: ordem?.osId || '',
       ordemServico,
     };
   }
 
-  const clienteNome =
-    limparTexto(
-      cliente?.clienteNome,
-      '-'
-    );
+  const clienteNome = limparTexto(
+    cliente?.clienteNome,
+    '-'
+  );
 
   const amostras = itens
-    .map(item =>
-      item.amostra
-    )
+    .map(item => item.amostra)
     .join('\n');
 
   const ensaios = itens
-    .map(item =>
-      item.ensaio
-    )
+    .map(item => item.ensaio)
     .join('\n');
 
   const status = itens
-    .map(item =>
-      item.status
-    )
+    .map(item => item.status)
     .join('\n');
 
-  const contexto =
-    Object.freeze({
-      ordem_servico:
-        ordemServico,
+  const contexto = Object.freeze({
+    ordem_servico: ordemServico,
+    os: ordemServico,
+    os_id: limparTexto(ordem?.osId),
+    detalhes: detalhesResultado.texto,
 
-      os:
-        ordemServico,
+    itens_compactos:
+      normalizarParametroMetaMultilinha(
+        detalhesCompactos(itens)
+      ),
 
-      os_id:
-        limparTexto(
-          ordem?.osId
-        ),
+    amostras,
+    ensaios,
+    status,
+    cliente: clienteNome,
+    cliente_nome: clienteNome,
+    cliente_id: limparTexto(cliente?.clienteId),
+    quantidade_itens: String(itens.length),
 
-      detalhes:
-        detalhesResultado.texto,
-
-      itens_compactos:
-        normalizarParametroMeta(
-          detalhesCompactos(
-            itens
-          )
-        ),
-
-      amostras,
-      ensaios,
-      status,
-
-      cliente:
-        clienteNome,
-
-      cliente_nome:
-        clienteNome,
-
-      cliente_id:
-        limparTexto(
-          cliente?.clienteId
-        ),
-
-      quantidade_itens:
-        String(
-          itens.length
-        ),
-
-      portal_url:
-        textoEnv(
-          'PORTAL_CLIENTE_URL',
-          'https://portal.itr.eng.br/login.html'
-        ),
-    });
+    portal_url: textoEnv(
+      'PORTAL_CLIENTE_URL',
+      'https://portal.itr.eng.br/login.html'
+    ),
+  });
 
   return {
-    ok:
-      true,
-
+    ok: true,
     contexto,
     itens,
-
-    formatoDetalhes:
-      detalhesResultado
-        .formatoUsado,
-
-    quantidadeItens:
-      itens.length,
-
-    tamanhoDetalhes:
-      detalhesResultado
-        .tamanhoDetalhes,
-
+    formatoDetalhes: detalhesResultado.formatoUsado,
+    quantidadeItens: itens.length,
+    tamanhoDetalhes: detalhesResultado.tamanhoDetalhes,
     tamanhoCorpoEstimado:
-      detalhesResultado
-        .tamanhoCorpoEstimado,
-
-    limiteCorpo:
-      detalhesResultado
-        .limiteCorpo,
+      detalhesResultado.tamanhoCorpoEstimado,
+    limiteCorpo: detalhesResultado.limiteCorpo,
   };
 }
 
@@ -877,12 +626,10 @@ function montarVariaveisDaOS(
 
 function resolverValor(
   origem,
-  contexto
+  contexto,
+  { preservarQuebras = false } = {}
 ) {
-  const referencia =
-    limparTexto(
-      origem
-    );
+  const referencia = limparTexto(origem);
 
   if (!referencia) {
     throw new Error(
@@ -890,22 +637,20 @@ function resolverValor(
     );
   }
 
-  if (
-    referencia.startsWith(
-      'literal:'
-    )
-  ) {
-    return referencia.slice(
-      'literal:'.length
-    );
+  if (referencia.startsWith('literal:')) {
+    const literal =
+      referencia.slice('literal:'.length);
+
+    return preservarQuebras
+      ? normalizarParametroMetaMultilinha(literal)
+      : limparTexto(literal);
   }
 
   if (
-    !Object.prototype
-      .hasOwnProperty.call(
-        contexto,
-        referencia
-      )
+    !Object.prototype.hasOwnProperty.call(
+      contexto,
+      referencia
+    )
   ) {
     throw new Error(
       `A origem "${referencia}" não existe ` +
@@ -913,10 +658,11 @@ function resolverValor(
     );
   }
 
-  const valor =
-    limparTexto(
-      contexto[referencia]
-    );
+  const valor = preservarQuebras
+    ? normalizarParametroMetaMultilinha(
+        contexto[referencia]
+      )
+    : limparTexto(contexto[referencia]);
 
   if (!valor) {
     throw new Error(
@@ -927,18 +673,27 @@ function resolverValor(
   return valor;
 }
 
+function origemPermiteMultilinha(origem) {
+  const referencia = limparTexto(origem);
+
+  return new Set([
+    'detalhes',
+    'itens_compactos',
+    'amostras',
+    'ensaios',
+    'status',
+  ]).has(referencia);
+}
+
 // ============================================================
 // PARÂMETROS DO CORPO
 // ============================================================
 
 function analisarMapeamentoCorpo() {
-  const itens =
-    CONFIG.bodyParameters
-      .split(',')
-      .map(item =>
-        item.trim()
-      )
-      .filter(Boolean);
+  const itens = CONFIG.bodyParameters
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
 
   if (itens.length === 0) {
     throw new Error(
@@ -948,38 +703,22 @@ function analisarMapeamentoCorpo() {
   }
 
   return itens.map(item => {
-    const separador =
-      item.indexOf('=');
+    const separador = item.indexOf('=');
 
     if (separador === -1) {
       return {
-        parameterName:
-          item,
-
-        source:
-          item,
+        parameterName: item,
+        source: item,
       };
     }
 
     const parameterName =
-      item
-        .slice(
-          0,
-          separador
-        )
-        .trim();
+      item.slice(0, separador).trim();
 
     const source =
-      item
-        .slice(
-          separador + 1
-        )
-        .trim();
+      item.slice(separador + 1).trim();
 
-    if (
-      !parameterName ||
-      !source
-    ) {
+    if (!parameterName || !source) {
       throw new Error(
         'Mapeamento inválido em ' +
         'WHATSAPP_TEMPLATE_BODY_PARAMETERS: ' +
@@ -987,80 +726,68 @@ function analisarMapeamentoCorpo() {
       );
     }
 
-    return {
-      parameterName,
-      source,
-    };
+    return { parameterName, source };
   });
 }
 
-function montarParametrosDoCorpo(
-  contexto
-) {
+function montarParametrosDoCorpo(contexto) {
   const modo =
-    garantirModoParametros(
-      CONFIG.parameterMode
+    garantirModoParametros(CONFIG.parameterMode);
+
+  const mapeamentos = analisarMapeamentoCorpo();
+
+  return mapeamentos.map(mapeamento => {
+    const preservarQuebras =
+      origemPermiteMultilinha(mapeamento.source);
+
+    const valorResolvido = resolverValor(
+      mapeamento.source,
+      contexto,
+      { preservarQuebras }
     );
 
-  const mapeamentos =
-    analisarMapeamentoCorpo();
+    const textoNormalizado = preservarQuebras
+      ? normalizarParametroMetaMultilinha(
+          valorResolvido
+        )
+      : normalizarParametroMeta(valorResolvido);
 
-  return mapeamentos.map(
-    mapeamento => {
-      const textoNormalizado =
-        normalizarParametroMeta(
-          resolverValor(
-            mapeamento.source,
-            contexto
-          )
-        );
-
-      if (!textoNormalizado) {
-        throw new Error(
-          `O parâmetro "${mapeamento.parameterName}" ` +
-          'ficou vazio após a normalização.'
-        );
-      }
-
-      const parametro = {
-        type:
-          'text',
-
-        text:
-          textoNormalizado,
-      };
-
-      if (modo === 'named') {
-        parametro.parameter_name =
-          mapeamento
-            .parameterName;
-      }
-
-      return parametro;
+    if (!textoNormalizado) {
+      throw new Error(
+        `O parâmetro "${mapeamento.parameterName}" ` +
+        'ficou vazio após a normalização.'
+      );
     }
-  );
+
+    const parametro = {
+      type: 'text',
+      text: textoNormalizado,
+    };
+
+    if (modo === 'named') {
+      parametro.parameter_name =
+        mapeamento.parameterName;
+    }
+
+    return parametro;
+  });
 }
 
 // ============================================================
 // CABEÇALHO OPCIONAL
 // ============================================================
 
-function montarComponenteCabecalho(
-  contexto
-) {
-  const tipo =
-    garantirTipoCabecalho(
-      CONFIG.headerType
-    );
+function montarComponenteCabecalho(contexto) {
+  const tipo = garantirTipoCabecalho(
+    CONFIG.headerType
+  );
 
   if (tipo === 'none') {
     return null;
   }
 
   if (tipo === 'text') {
-    if (
-      !CONFIG.headerTextSource
-    ) {
+    if (!CONFIG.headerTextSource) {
       throw new Error(
         'Defina ' +
         'WHATSAPP_TEMPLATE_HEADER_TEXT_SOURCE ' +
@@ -1069,61 +796,43 @@ function montarComponenteCabecalho(
     }
 
     const parametro = {
-      type:
-        'text',
-
-      text:
-        normalizarParametroMeta(
-          resolverValor(
-            CONFIG.headerTextSource,
-            contexto
-          )
-        ),
+      type: 'text',
+      text: normalizarParametroMeta(
+        resolverValor(
+          CONFIG.headerTextSource,
+          contexto
+        )
+      ),
     };
 
     if (
-      garantirModoParametros(
-        CONFIG.parameterMode
-      ) === 'named' &&
-      CONFIG
-        .headerTextParameterName
+      garantirModoParametros(CONFIG.parameterMode) ===
+        'named' &&
+      CONFIG.headerTextParameterName
     ) {
       parametro.parameter_name =
-        CONFIG
-          .headerTextParameterName;
+        CONFIG.headerTextParameterName;
     }
 
     return {
-      type:
-        'header',
-
-      parameters: [
-        parametro,
-      ],
+      type: 'header',
+      parameters: [parametro],
     };
   }
 
   const midia = {};
 
   if (CONFIG.headerMediaId) {
-    midia.id =
-      CONFIG.headerMediaId;
-  } else if (
-    CONFIG.headerMediaUrl
-  ) {
-    if (
-      !urlHttpsValida(
-        CONFIG.headerMediaUrl
-      )
-    ) {
+    midia.id = CONFIG.headerMediaId;
+  } else if (CONFIG.headerMediaUrl) {
+    if (!urlHttpsValida(CONFIG.headerMediaUrl)) {
       throw new Error(
         'WHATSAPP_TEMPLATE_HEADER_MEDIA_URL ' +
         'deve usar HTTPS e ser uma URL válida.'
       );
     }
 
-    midia.link =
-      CONFIG.headerMediaUrl;
+    midia.link = CONFIG.headerMediaUrl;
   } else {
     throw new Error(
       `O cabeçalho ${tipo} exige ` +
@@ -1134,25 +843,18 @@ function montarComponenteCabecalho(
 
   if (
     tipo === 'document' &&
-    CONFIG
-      .headerDocumentFilename
+    CONFIG.headerDocumentFilename
   ) {
     midia.filename =
-      CONFIG
-        .headerDocumentFilename;
+      CONFIG.headerDocumentFilename;
   }
 
   return {
-    type:
-      'header',
-
+    type: 'header',
     parameters: [
       {
-        type:
-          tipo,
-
-        [tipo]:
-          midia,
+        type: tipo,
+        [tipo]: midia,
       },
     ],
   };
@@ -1162,85 +864,55 @@ function montarComponenteCabecalho(
 // BOTÕES DINÂMICOS OPCIONAIS
 // ============================================================
 
-function montarComponentesBotoes(
-  contexto
-) {
+function montarComponentesBotoes(contexto) {
   if (!CONFIG.buttons) {
     return [];
   }
 
-  const definicoes =
-    CONFIG.buttons
-      .split('|')
-      .map(item =>
-        item.trim()
-      )
-      .filter(Boolean);
+  const definicoes = CONFIG.buttons
+    .split('|')
+    .map(item => item.trim())
+    .filter(Boolean);
 
-  return definicoes.map(
-    definicao => {
-      const correspondencia =
-        /^(url|quick_reply):(\d+)=(.+)$/
-          .exec(
-            definicao
-          );
+  return definicoes.map(definicao => {
+    const correspondencia =
+      /^(url|quick_reply):(\d+)=(.+)$/.exec(
+        definicao
+      );
 
-      if (!correspondencia) {
-        throw new Error(
-          'Botão inválido em ' +
-          'WHATSAPP_TEMPLATE_BUTTONS: ' +
-          definicao
-        );
-      }
-
-      const [
-        ,
-        subtipo,
-        indice,
-        origem,
-      ] = correspondencia;
-
-      const valor =
-        normalizarParametroMeta(
-          resolverValor(
-            origem,
-            contexto
-          )
-        );
-
-      const parametro =
-        subtipo === 'quick_reply'
-          ? {
-              type:
-                'payload',
-
-              payload:
-                valor,
-            }
-          : {
-              type:
-                'text',
-
-              text:
-                valor,
-            };
-
-      return {
-        type:
-          'button',
-
-        sub_type:
-          subtipo,
-
-        index:
-          indice,
-
-        parameters: [
-          parametro,
-        ],
-      };
+    if (!correspondencia) {
+      throw new Error(
+        'Botão inválido em ' +
+        'WHATSAPP_TEMPLATE_BUTTONS: ' +
+        definicao
+      );
     }
-  );
+
+    const [, subtipo, indice, origem] =
+      correspondencia;
+
+    const valor = normalizarParametroMeta(
+      resolverValor(origem, contexto)
+    );
+
+    const parametro =
+      subtipo === 'quick_reply'
+        ? {
+            type: 'payload',
+            payload: valor,
+          }
+        : {
+            type: 'text',
+            text: valor,
+          };
+
+    return {
+      type: 'button',
+      sub_type: subtipo,
+      index: indice,
+      parameters: [parametro],
+    };
+  });
 }
 
 // ============================================================
@@ -1253,68 +925,43 @@ function montarPayloadTemplateWhatsApp({
   telefone,
 }) {
   const templateName =
-    limparTexto(
-      CONFIG.templateName
-    );
+    limparTexto(CONFIG.templateName);
 
   const templateLanguage =
-    limparTexto(
-      CONFIG.templateLanguage
-    );
+    limparTexto(CONFIG.templateLanguage);
 
   if (!templateName) {
     return {
-      ok:
-        false,
-
-      motivo:
-        'template-nao-configurado',
-
-      mensagem:
-        'Preencha WHATSAPP_TEMPLATE_NAME.',
+      ok: false,
+      motivo: 'template-nao-configurado',
+      mensagem: 'Preencha WHATSAPP_TEMPLATE_NAME.',
     };
   }
 
   if (!templateLanguage) {
     return {
-      ok:
-        false,
-
-      motivo:
-        'idioma-template-nao-configurado',
-
+      ok: false,
+      motivo: 'idioma-template-nao-configurado',
       mensagem:
         'Preencha WHATSAPP_TEMPLATE_LANGUAGE.',
     };
   }
 
-  const telefoneFinal =
-    limparTexto(
-      telefone ||
-        cliente?.whatsapp
-    );
+  const telefoneFinal = limparTexto(
+    telefone || cliente?.whatsapp
+  );
 
   if (!telefoneFinal) {
     return {
-      ok:
-        false,
-
-      motivo:
-        'telefone-ausente',
-
-      clienteId:
-        cliente?.clienteId || '',
-
-      osId:
-        ordem?.osId || '',
+      ok: false,
+      motivo: 'telefone-ausente',
+      clienteId: cliente?.clienteId || '',
+      osId: ordem?.osId || '',
     };
   }
 
   const variaveis =
-    montarVariaveisDaOS(
-      cliente,
-      ordem
-    );
+    montarVariaveisDaOS(cliente, ordem);
 
   if (!variaveis.ok) {
     return variaveis;
@@ -1329,15 +976,11 @@ function montarPayloadTemplateWhatsApp({
       );
 
     if (cabecalho) {
-      components.push(
-        cabecalho
-      );
+      components.push(cabecalho);
     }
 
     components.push({
-      type:
-        'body',
-
+      type: 'body',
       parameters:
         montarParametrosDoCorpo(
           variaveis.contexto
@@ -1351,70 +994,40 @@ function montarPayloadTemplateWhatsApp({
     );
 
     return {
-      ok:
-        true,
+      ok: true,
 
       payload: {
-        messaging_product:
-          'whatsapp',
-
-        recipient_type:
-          'individual',
-
-        to:
-          telefoneFinal,
-
-        type:
-          'template',
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: telefoneFinal,
+        type: 'template',
 
         template: {
-          name:
-            templateName,
-
+          name: templateName,
           language: {
-            code:
-              templateLanguage,
+            code: templateLanguage,
           },
-
           components,
         },
       },
 
-      contexto:
-        variaveis.contexto,
-
-      itens:
-        variaveis.itens,
-
+      contexto: variaveis.contexto,
+      itens: variaveis.itens,
       quantidadeItens:
-        variaveis
-          .quantidadeItens,
-
+        variaveis.quantidadeItens,
       formatoDetalhes:
-        variaveis
-          .formatoDetalhes,
-
+        variaveis.formatoDetalhes,
       tamanhoDetalhes:
-        variaveis
-          .tamanhoDetalhes,
-
+        variaveis.tamanhoDetalhes,
       tamanhoCorpoEstimado:
-        variaveis
-          .tamanhoCorpoEstimado,
-
+        variaveis.tamanhoCorpoEstimado,
       limiteCorpo:
-        variaveis
-          .limiteCorpo,
+        variaveis.limiteCorpo,
 
-      clienteId:
-        cliente?.clienteId || '',
-
+      clienteId: cliente?.clienteId || '',
       clienteNome:
         cliente?.clienteNome || '',
-
-      osId:
-        ordem?.osId || '',
-
+      osId: ordem?.osId || '',
       osNome:
         ordem?.osNome ||
         ordem?.osId ||
@@ -1422,20 +1035,11 @@ function montarPayloadTemplateWhatsApp({
     };
   } catch (erro) {
     return {
-      ok:
-        false,
-
-      motivo:
-        'configuracao-template-invalida',
-
-      mensagem:
-        erro.message,
-
-      clienteId:
-        cliente?.clienteId || '',
-
-      osId:
-        ordem?.osId || '',
+      ok: false,
+      motivo: 'configuracao-template-invalida',
+      mensagem: erro.message,
+      clienteId: cliente?.clienteId || '',
+      osId: ordem?.osId || '',
     };
   }
 }
@@ -1453,6 +1057,7 @@ module.exports = {
   detalhesCompactos,
 
   normalizarParametroMeta,
+  normalizarParametroMetaMultilinha,
   contarCaracteres,
   estimarTamanhoCorpoFinal,
 
