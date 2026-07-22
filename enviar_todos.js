@@ -40,9 +40,19 @@ const {
 } = require('./enviar_email.js');
 
 const {
+  prepararEnvioWhatsAppDaOS,
   enviarWhatsAppDaOS,
   CONFIG: WHATSAPP_CONFIG,
 } = require('./enviar_whatsapp.js');
+
+const {
+  criarHashEnvio,
+  reservarEnvio,
+  marcarComoEnviado,
+  marcarComoFalhou,
+  marcarComoIncerto,
+  CONFIG: IDEMPOTENCIA_CONFIG,
+} = require('./idempotencia_airtable.js');
 
 // ============================================================
 // CONFIGURAÇÕES
@@ -198,6 +208,144 @@ function destinoEmailDoCliente(cliente) {
   return cliente?.email || '';
 }
 
+function idempotenciaAplicavelAoEmail() {
+  return (
+    IDEMPOTENCIA_CONFIG.ativo &&
+    CONFIG.emailAtivo &&
+    !MODO_TESTE
+  );
+}
+
+function idempotenciaAplicavelAoWhatsapp() {
+  return (
+    IDEMPOTENCIA_CONFIG.ativo &&
+    WHATSAPP_CONFIG.ativo &&
+    !WHATSAPP_CONFIG.simular &&
+    !WHATSAPP_CONFIG.modoTeste
+  );
+}
+
+function emailConfirmado(resultado) {
+  return (
+    resultado?.enviado === true ||
+    resultado?.confirmadoAnteriormente === true
+  );
+}
+
+function falhaWhatsappEhIncerta(resultado) {
+  const statusHttp = Number(
+    resultado?.statusHttp || 0
+  );
+
+  const tipoErro = String(
+    resultado?.tipoErro || ''
+  ).toLowerCase();
+
+  if (
+    tipoErro.includes('timeout') ||
+    tipoErro.includes('network') ||
+    tipoErro.includes('rede')
+  ) {
+    return true;
+  }
+
+  if (!statusHttp) {
+    return true;
+  }
+
+  return (
+    statusHttp === 408 ||
+    statusHttp === 429 ||
+    statusHttp >= 500
+  );
+}
+
+async function finalizarIdempotencia({
+  reserva,
+  estado,
+  canal,
+  clienteNome,
+  osNome,
+  resumo,
+}) {
+  if (!reserva) {
+    return {
+      ok: true,
+      atualizado: false,
+      bypass: true,
+    };
+  }
+
+  let resultado;
+
+  if (estado === 'enviado') {
+    resultado = await marcarComoEnviado(
+      reserva
+    );
+  } else if (estado === 'falhou') {
+    resultado = await marcarComoFalhou(
+      reserva
+    );
+  } else {
+    resultado = await marcarComoIncerto(
+      reserva
+    );
+  }
+
+  if (!resultado?.ok) {
+    resumo[canal]
+      .idempotenciaFalhas += 1;
+
+    console.error(
+      `  [IDEMPOTÊNCIA ALERTA] ` +
+      `${clienteNome} / ${osNome} / ` +
+      `${canal}: ` +
+      `${resultado?.mensagem || `falha ao registrar ${estado}`}`
+    );
+  }
+
+  return resultado;
+}
+
+function resultadoBloqueadoPorIdempotencia({
+  controle,
+  canal,
+  clienteNome,
+  osNome,
+  resumo,
+}) {
+  resumo[canal]
+    .idempotenciaIgnorados += 1;
+
+  if (controle?.ok === false) {
+    resumo[canal]
+      .idempotenciaFalhas += 1;
+  }
+
+  console.warn(
+    `  [${canal.toUpperCase()} IDEMPOTÊNCIA] ` +
+    `${clienteNome} / ${osNome}: ` +
+    `${controle?.motivo || 'envio bloqueado'}`
+  );
+
+  return {
+    ok:
+      controle?.ok !== false,
+    enviado: false,
+    simulado: false,
+    ignorado: true,
+    motivo:
+      controle?.motivo ||
+      'bloqueado-por-idempotencia',
+    mensagem:
+      controle?.mensagem || '',
+    confirmadoAnteriormente:
+      controle?.confirmadoAnteriormente === true,
+    idempotencia:
+      true,
+  };
+}
+
 function criarResumoInicial() {
   return {
     ok: true,
@@ -221,6 +369,8 @@ function criarResumoInicial() {
       falhas: 0,
       semDestino: 0,
       desativados: 0,
+      idempotenciaIgnorados: 0,
+      idempotenciaFalhas: 0,
     },
 
     whatsapp: {
@@ -230,6 +380,8 @@ function criarResumoInicial() {
       ignorados: 0,
       desativados: 0,
       bloqueadosPorEmail: 0,
+      idempotenciaIgnorados: 0,
+      idempotenciaFalhas: 0,
     },
   };
 }
@@ -345,6 +497,8 @@ async function processarEmailDaOS({
     };
   }
 
+  let reserva = null;
+
   try {
     const conteudo =
       montarEmailDaOS(
@@ -364,12 +518,58 @@ async function processarEmailDaOS({
       );
     }
 
+    const destino =
+      destinoEmailDoCliente(
+        cliente
+      );
+
+    if (idempotenciaAplicavelAoEmail()) {
+      const hash = criarHashEnvio({
+        canal: 'email',
+        clienteId:
+          cliente?.clienteId || '',
+        osId:
+          ordem?.osId || '',
+        destino,
+        conteudo: {
+          assunto:
+            conteudo.assunto,
+          texto:
+            conteudo.texto,
+          html:
+            conteudo.html,
+        },
+      });
+
+      const controle =
+        await reservarEnvio({
+          canal: 'email',
+          osId:
+            ordem?.osId || '',
+          hash,
+        });
+
+      if (
+        controle?.bloqueado === true ||
+        controle?.ok === false
+      ) {
+        return resultadoBloqueadoPorIdempotencia({
+          controle,
+          canal: 'email',
+          clienteNome,
+          osNome,
+          resumo,
+        });
+      }
+
+      reserva =
+        controle?.reserva || null;
+    }
+
     const resultado =
       await enviar({
         para:
-          destinoEmailDoCliente(
-            cliente
-          ),
+          destino,
 
         assunto:
           conteudo.assunto,
@@ -382,6 +582,15 @@ async function processarEmailDaOS({
       });
 
     if (!resultado?.ok) {
+      await finalizarIdempotencia({
+        reserva,
+        estado: 'incerto',
+        canal: 'email',
+        clienteNome,
+        osNome,
+        resumo,
+      });
+
       resumo.email.falhas += 1;
 
       console.error(
@@ -399,6 +608,16 @@ async function processarEmailDaOS({
           'falha-email',
       };
     }
+
+    const idempotencia =
+      await finalizarIdempotencia({
+        reserva,
+        estado: 'enviado',
+        canal: 'email',
+        clienteNome,
+        osNome,
+        resumo,
+      });
 
     resumo.email.enviados += 1;
 
@@ -424,8 +643,19 @@ async function processarEmailDaOS({
         resultado.id || '',
       destino:
         resultado.destino,
+      idempotenciaPersistida:
+        idempotencia?.ok !== false,
     };
   } catch (erro) {
+    await finalizarIdempotencia({
+      reserva,
+      estado: 'incerto',
+      canal: 'email',
+      clienteNome,
+      osNome,
+      resumo,
+    });
+
     resumo.email.falhas += 1;
 
     console.error(
@@ -471,14 +701,14 @@ async function processarWhatsAppDaOS({
 
   if (
     CONFIG.whatsappExigirEmailEnviado &&
-    emailResultado?.enviado !== true
+    !emailConfirmado(emailResultado)
   ) {
     resumo.whatsapp.bloqueadosPorEmail += 1;
 
     console.warn(
       `  [WHATSAPP PULADO] ` +
       `${clienteNome} / ${osNome}: ` +
-      `o e-mail da OS não foi enviado.`
+      `o e-mail da OS não foi confirmado.`
     );
 
     return {
@@ -487,16 +717,106 @@ async function processarWhatsAppDaOS({
       simulado: false,
       ignorado: true,
       motivo:
-        'email-nao-enviado',
+        'email-nao-confirmado',
     };
   }
 
+  let reserva = null;
+
   try {
+    if (
+      idempotenciaAplicavelAoWhatsapp()
+    ) {
+      const preparado =
+        prepararEnvioWhatsAppDaOS({
+          cliente,
+          ordem,
+        });
+
+      if (preparado?.ok) {
+        const hash = criarHashEnvio({
+          canal: 'whatsapp',
+          clienteId:
+            cliente?.clienteId || '',
+          osId:
+            ordem?.osId || '',
+          destino:
+            preparado.payload?.to || '',
+          conteudo:
+            preparado.payload,
+        });
+
+        const controle =
+          await reservarEnvio({
+            canal: 'whatsapp',
+            osId:
+              ordem?.osId || '',
+            hash,
+          });
+
+        if (
+          controle?.bloqueado === true ||
+          controle?.ok === false
+        ) {
+          const bloqueado =
+            resultadoBloqueadoPorIdempotencia({
+              controle,
+              canal: 'whatsapp',
+              clienteNome,
+              osNome,
+              resumo,
+            });
+
+          registrarResultadoWhatsApp(
+            resumo,
+            bloqueado
+          );
+
+          return bloqueado;
+        }
+
+        reserva =
+          controle?.reserva || null;
+      }
+    }
+
     const resultado =
       await enviarWhatsAppDaOS({
         cliente,
         ordem,
       });
+
+    if (resultado?.enviado === true) {
+      resultado.idempotenciaPersistida =
+        (
+          await finalizarIdempotencia({
+            reserva,
+            estado: 'enviado',
+            canal: 'whatsapp',
+            clienteNome,
+            osNome,
+            resumo,
+          })
+        )?.ok !== false;
+    } else if (reserva) {
+      const incerto =
+        resultado?.ok === false &&
+        falhaWhatsappEhIncerta(
+          resultado
+        );
+
+      await finalizarIdempotencia({
+        reserva,
+        estado:
+          incerto
+            ? 'incerto'
+            : 'falhou',
+        canal: 'whatsapp',
+        clienteNome,
+        osNome,
+        resumo,
+      });
+    }
 
     registrarResultadoWhatsApp(
       resumo,
@@ -505,6 +825,15 @@ async function processarWhatsAppDaOS({
 
     return resultado;
   } catch (erro) {
+    await finalizarIdempotencia({
+      reserva,
+      estado: 'incerto',
+      canal: 'whatsapp',
+      clienteNome,
+      osNome,
+      resumo,
+    });
+
     resumo.whatsapp.falhas += 1;
 
     console.error(
@@ -557,6 +886,17 @@ async function executarInternamente(
   if (!CONFIG.emailAtivo) {
     console.log(
       '*** CANAL DE E-MAIL DESATIVADO. ***'
+    );
+  }
+
+  if (IDEMPOTENCIA_CONFIG.ativo) {
+    console.log(
+      '*** IDEMPOTÊNCIA PERSISTENTE ATIVA: ' +
+      'envios repetidos serão bloqueados pelo Airtable. ***'
+    );
+  } else {
+    console.log(
+      '*** IDEMPOTÊNCIA PERSISTENTE DESATIVADA. ***'
     );
   }
 
@@ -793,6 +1133,16 @@ async function executarInternamente(
   );
 
   console.log(
+    `E-mails bloqueados pela idempotência: ` +
+    `${resumo.email.idempotenciaIgnorados}`
+  );
+
+  console.log(
+    `Falhas do controle de e-mail: ` +
+    `${resumo.email.idempotenciaFalhas}`
+  );
+
+  console.log(
     `WhatsApps enviados: ${resumo.whatsapp.enviados}`
   );
 
@@ -815,6 +1165,16 @@ async function executarInternamente(
   console.log(
     `WhatsApps bloqueados por falha/ausência de e-mail: ` +
     `${resumo.whatsapp.bloqueadosPorEmail}`
+  );
+
+  console.log(
+    `WhatsApps bloqueados pela idempotência: ` +
+    `${resumo.whatsapp.idempotenciaIgnorados}`
+  );
+
+  console.log(
+    `Falhas do controle de WhatsApp: ` +
+    `${resumo.whatsapp.idempotenciaFalhas}`
   );
 
   console.log(
