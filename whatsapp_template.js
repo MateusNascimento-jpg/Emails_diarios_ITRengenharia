@@ -236,7 +236,7 @@ function itensDaOS(ordem) {
     );
 
     const ensaioCurto = limparTexto(
-      ensaioSigla || ensaioNome || ensaio,
+      ensaioNome || ensaioSigla || ensaio,
       '-'
     );
 

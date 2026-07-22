@@ -219,7 +219,7 @@ function prepararComCliente(
 }
 
 // ============================================================
-// TESTE 1 — TEMPLATE DE MENSAGEM PEQUENA
+// TESTE 1 — TEMPLATE COM FALLBACK COMPACTO
 // ============================================================
 
 function validarMensagemPequena() {
@@ -307,7 +307,7 @@ function validarMensagemPequena() {
 
   assert.equal(
     resultado.formatoDetalhes,
-    'blocos'
+    'compacto'
   );
 
   assert.equal(
@@ -328,55 +328,38 @@ function validarMensagemPequena() {
 
   assert.match(
     detalhes,
-    /1\) Amostra:/
+    /^Status: Relatório Pronto/m
   );
 
   assert.match(
-  detalhes,
-  /◆ \*1\) Amostra:\*/
-);
+    detalhes,
+    /Índice de Suporte Califórnia:/
+  );
 
-assert.match(
-  detalhes,
-  /\*Ensaio:\* CBR-N/
-);
+  assert.match(
+    detalhes,
+    /REG 1593 \(ST-TCV-TPS-G21-1089\)/
+  );
 
-assert.match(
-  detalhes,
-  /\*Status:\* Relatório Pronto/
-);
+  assert.match(
+    detalhes,
+    /1615 \(ST-TCV-TAC-C21-2005\)/
+  );
 
-// Uma linha em branco entre Amostra, Ensaio e Status.
-assert.match(
-  detalhes,
-  /\*1\) Amostra:\*[^\n]+\n\n\*Ensaio:\*/
-);
+  assert.equal(
+    detalhes.includes('\r'),
+    false
+  );
 
-assert.match(
-  detalhes,
-  /\*Ensaio:\*[^\n]+\n\n\*Status:\*/
-);
+  assert.equal(
+    detalhes.includes('\t'),
+    false
+  );
 
-// Duas linhas em branco entre uma amostra e outra.
-assert.match(
-  detalhes,
-  /\*Status:\*[^\n]+\n\n\n◆ \*2\) Amostra:\*/
-);
-
-assert.equal(
-  detalhes.includes('\r'),
-  false
-);
-
-assert.equal(
-  detalhes.includes('\t'),
-  false
-);
-
-assert.equal(
-  detalhes.includes(' || '),
-  false
-);
+  assert.equal(
+    detalhes.includes(' || '),
+    false
+  );
 
   const cabecalho =
     resultado.payload.template.components
@@ -859,6 +842,111 @@ function validarNormalizacao() {
 }
 
 // ============================================================
+// TESTE 15 — PRIORIDADE DO NOME COMPLETO DO ENSAIO
+// ============================================================
+
+function validarPrioridadeNomeEnsaio() {
+  const resultadoComNome =
+    montarPayloadTemplateWhatsApp({
+      cliente:
+        clienteBase(),
+
+      ordem: {
+        osId:
+          'os-nome-ensaio',
+
+        osNome:
+          'OS NOME ENSAIO',
+
+        linhas: [
+          linha({
+            amostra:
+              'A-01',
+
+            ensaioNome:
+              'Limite de Liquidez',
+
+            ensaioSigla:
+              'LL',
+          }),
+        ],
+      },
+
+      telefone:
+        '5561999999999',
+    });
+
+  assert.equal(
+    resultadoComNome.ok,
+    true
+  );
+
+  const detalhesComNome =
+    parametroNomeado(
+      resultadoComNome.payload,
+      'detalhes'
+    )?.text || '';
+
+  assert.match(
+    detalhesComNome,
+    /\*Ensaio:\* Limite de Liquidez/
+  );
+
+  assert.equal(
+    detalhesComNome.includes(
+      '*Ensaio:* LL'
+    ),
+    false
+  );
+
+  const resultadoSemNome =
+    montarPayloadTemplateWhatsApp({
+      cliente:
+        clienteBase(),
+
+      ordem: {
+        osId:
+          'os-sigla-ensaio',
+
+        osNome:
+          'OS SIGLA ENSAIO',
+
+        linhas: [
+          linha({
+            amostra:
+              'A-02',
+
+            ensaioNome:
+              '',
+
+            ensaioSigla:
+              'LL',
+          }),
+        ],
+      },
+
+      telefone:
+        '5561999999999',
+    });
+
+  assert.equal(
+    resultadoSemNome.ok,
+    true
+  );
+
+  const detalhesSemNome =
+    parametroNomeado(
+      resultadoSemNome.payload,
+      'detalhes'
+    )?.text || '';
+
+  assert.match(
+    detalhesSemNome,
+    /\*Ensaio:\* LL/
+  );
+}
+
+// ============================================================
 // EXECUÇÃO DO SCRIPT FINAL
 // ============================================================
 
@@ -877,13 +965,14 @@ function executar() {
   validarBloqueioPorListaDoAmbiente();
   validarCompatibilidadeModoTeste();
   validarNormalizacao();
+  validarPrioridadeNomeEnsaio();
 
   console.log(
     'VALIDAÇÃO WHATSAPP: OK'
-  );132974
+  );
 
   console.log(
-    'TESTES EXECUTADOS: 14'
+    'TESTES EXECUTADOS: 15'
   );
 
   console.log(
@@ -925,4 +1014,4 @@ try {
 
   process.exitCode =
     1;
-} 
+}
