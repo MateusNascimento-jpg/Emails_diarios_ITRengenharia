@@ -1,24 +1,5 @@
 'use strict';
 
-// ============================================================
-// validar_whatsapp_local.js
-// ============================================================
-//
-// Validação local segura do template e das blindagens do canal.
-//
-// Este arquivo:
-//
-// - NÃO consulta o Airtable;
-// - NÃO envia e-mails;
-// - NÃO chama a Meta;
-// - NÃO utiliza dados reais de clientes;
-// - NÃO altera o .env;
-// - NÃO grava arquivos.
-//
-// As variáveis abaixo são fixadas antes dos requires para que
-// o teste não herde destinos ou credenciais reais do ambiente.
-// ============================================================
-
 process.env.WHATSAPP_TEMPLATE_NAME =
   'atualizacao_ordem_servico';
 
@@ -61,7 +42,6 @@ process.env.WHATSAPP_SIMULAR =
 process.env.WHATSAPP_MODO_TESTE =
   'true';
 
-// Número totalmente fictício usado como destino controlado.
 process.env.WHATSAPP_TEST_NUMBER =
   '5561999999999';
 
@@ -77,7 +57,6 @@ process.env.WHATSAPP_API_VERSION =
 process.env.WHATSAPP_COUNTRY_CODE =
   '55';
 
-// Número fictício usado para validar a lista de bloqueio.
 process.env.WHATSAPP_NUMEROS_BLOQUEADOS =
   '5561988887777';
 
@@ -88,6 +67,7 @@ const {
   montarPayloadTemplateWhatsApp,
   montarVariaveisDaOS,
   normalizarParametroMeta,
+  validarPayloadTemplateMeta,
 } = require('./whatsapp_template.js');
 
 const {
@@ -96,9 +76,25 @@ const {
   prepararEnvioWhatsAppDaOS,
 } = require('./enviar_whatsapp.js');
 
-// ============================================================
-// DADOS FICTÍCIOS
-// ============================================================
+function linha({
+  amostra,
+
+  ensaioNome =
+    'Índice de Suporte Califórnia',
+
+  ensaioSigla =
+    'CBR-N',
+
+  status =
+    'Enviado ao Cliente',
+}) {
+  return {
+    amostra,
+    ensaioNome,
+    ensaioSigla,
+    status,
+  };
+}
 
 function clienteBase(
   alteracoes = {}
@@ -160,23 +156,6 @@ function ordemBase(
   };
 }
 
-function linha({
-  amostra,
-  ensaioNome =
-    'Índice de Suporte Califórnia',
-  ensaioSigla =
-    'CBR-N',
-  status =
-    'Enviado ao Cliente',
-}) {
-  return {
-    amostra,
-    ensaioNome,
-    ensaioSigla,
-    status,
-  };
-}
-
 function parametrosDoCorpo(
   payload
 ) {
@@ -218,83 +197,62 @@ function prepararComCliente(
   });
 }
 
-// ============================================================
-// TESTE 1 — TEMPLATE COM FALLBACK COMPACTO
-// ============================================================
-
 function validarMensagemPequena() {
-  const ordem = {
-    osId:
-      'os-43',
-
-    osNome:
-      'OS 43',
-
-    linhas: [
-      linha({
-        amostra:
-          'REG 1593 (ST-TCV-TPS-G21-1089)',
-
-        ensaioSigla:
-          'CBR-N',
-      }),
-
-      linha({
-        amostra:
-          'REG 1573 (ST-TCV-TPS-G21-1078)',
-
-        ensaioSigla:
-          'CBR-N',
-      }),
-
-      linha({
-        amostra:
-          'REG 1592 (ST-TCV-TPS-G21-1089)',
-
-        ensaioSigla:
-          'CBR-I',
-      }),
-
-      linha({
-        amostra:
-          'REG 1621 (ST-TCV-TPS-G21-2006)',
-
-        ensaioSigla:
-          'CBR-N',
-      }),
-
-      linha({
-        amostra:
-          'REG 1623 (ST-TCV-TPS-G21-2007)',
-
-        ensaioSigla:
-          'CBR-I',
-      }),
-
-      linha({
-        amostra:
-          'REG 1594 (ST-TCV-TPS-G21-1089)',
-
-        ensaioSigla:
-          'CBR-I',
-      }),
-
-      linha({
-        amostra:
-          'REG 1615 (ST-TCV-TAC-C21-2005)',
-
-        ensaioSigla:
-          'CBR-I',
-      }),
+  const amostras = [
+    [
+      'REG 1593 (ST-TCV-TPS-G21-1089)',
+      'CBR-N',
     ],
-  };
+    [
+      'REG 1573 (ST-TCV-TPS-G21-1078)',
+      'CBR-N',
+    ],
+    [
+      'REG 1592 (ST-TCV-TPS-G21-1089)',
+      'CBR-I',
+    ],
+    [
+      'REG 1621 (ST-TCV-TPS-G21-2006)',
+      'CBR-N',
+    ],
+    [
+      'REG 1623 (ST-TCV-TPS-G21-2007)',
+      'CBR-I',
+    ],
+    [
+      'REG 1594 (ST-TCV-TPS-G21-1089)',
+      'CBR-I',
+    ],
+    [
+      'REG 1615 (ST-TCV-TAC-C21-2005)',
+      'CBR-I',
+    ],
+  ];
 
   const resultado =
     montarPayloadTemplateWhatsApp({
       cliente:
         clienteBase(),
 
-      ordem,
+      ordem: {
+        osId:
+          'os-43',
+
+        osNome:
+          'OS 43',
+
+        linhas:
+          amostras.map(
+            ([
+              amostra,
+              ensaioSigla,
+            ]) =>
+              linha({
+                amostra,
+                ensaioSigla,
+              })
+          ),
+      },
 
       telefone:
         '5561999999999',
@@ -347,18 +305,31 @@ function validarMensagemPequena() {
   );
 
   assert.equal(
-    detalhes.includes('\r'),
+    /[\r\n\t\u2028\u2029]/.test(
+      detalhes
+    ),
     false
   );
 
   assert.equal(
-    detalhes.includes('\t'),
+    / {5,}/.test(
+      detalhes
+    ),
     false
   );
 
   assert.equal(
-    detalhes.includes(' || '),
+    detalhes.includes(
+      ' || '
+    ),
     false
+  );
+
+  assert.equal(
+    validarPayloadTemplateMeta(
+      resultado.payload
+    ),
+    true
   );
 
   const cabecalho =
@@ -388,10 +359,6 @@ function validarMensagemPequena() {
     /^https:\/\//
   );
 }
-
-// ============================================================
-// TESTE 2 — DEDUPLICAÇÃO
-// ============================================================
 
 function validarDeduplicacao() {
   const item =
@@ -431,10 +398,6 @@ function validarDeduplicacao() {
   );
 }
 
-// ============================================================
-// TESTE 3 — FALLBACK OU BLOQUEIO POR TAMANHO
-// ============================================================
-
 function validarFallbackCompactoOuBloqueioSeguro() {
   const linhas =
     Array.from(
@@ -473,7 +436,9 @@ function validarFallbackCompactoOuBloqueioSeguro() {
       }
     );
 
-  if (resultado.ok) {
+  if (
+    resultado.ok
+  ) {
     assert.equal(
       resultado.formatoDetalhes,
       'compacto'
@@ -495,14 +460,10 @@ function validarFallbackCompactoOuBloqueioSeguro() {
   assert.ok(
     resultado.tamanhoCorpoEstimado >
       resultado.limiteCorpo ||
-      resultado.tamanho >
-        800
+    resultado.tamanho >
+      800
   );
 }
-
-// ============================================================
-// TESTE 4 — NORMALIZAÇÃO DO TELEFONE
-// ============================================================
 
 function validarTelefone() {
   const nacional =
@@ -520,20 +481,13 @@ function validarTelefone() {
     '5561999999999'
   );
 
-  const invalido =
+  assert.equal(
     normalizarTelefone(
       '123'
-    );
-
-  assert.equal(
-    invalido.ok,
+    ).ok,
     false
   );
 }
-
-// ============================================================
-// TESTE 5 — CONTATO SEGURO
-// ============================================================
 
 function validarContatoSeguro() {
   const resultado =
@@ -551,10 +505,6 @@ function validarContatoSeguro() {
     1
   );
 }
-
-// ============================================================
-// TESTE 6 — PREPARAÇÃO EM MODO DE TESTE
-// ============================================================
 
 function validarPreparacao() {
   const resultado =
@@ -581,10 +531,6 @@ function validarPreparacao() {
   );
 }
 
-// ============================================================
-// TESTE 7 — whatsappSeguroParaEnvio=false
-// ============================================================
-
 function validarBloqueioContatoInseguro() {
   const resultado =
     prepararComCliente({
@@ -602,10 +548,6 @@ function validarBloqueioContatoInseguro() {
     'whatsapp-inseguro-para-envio'
   );
 }
-
-// ============================================================
-// TESTE 8 — FLAG whatsappBloqueado
-// ============================================================
 
 function validarBloqueioMarcadoNoAirtable() {
   const resultado =
@@ -628,10 +570,6 @@ function validarBloqueioMarcadoNoAirtable() {
     'numero-bloqueado-no-airtable'
   );
 }
-
-// ============================================================
-// TESTE 9 — NÚMERO COMPARTILHADO ENTRE CLIENTES
-// ============================================================
 
 function validarBloqueioNumeroCompartilhado() {
   const resultado =
@@ -670,10 +608,6 @@ function validarBloqueioNumeroCompartilhado() {
     2
   );
 }
-
-// ============================================================
-// TESTE 10 — CONTATO AMBÍGUO
-// ============================================================
 
 function validarBloqueioContatoAmbiguo() {
   const resultado =
@@ -725,10 +659,6 @@ function validarBloqueioContatoAmbiguo() {
   );
 }
 
-// ============================================================
-// TESTE 11 — CONTATO MARCADO COMO INVÁLIDO
-// ============================================================
-
 function validarBloqueioContatoInvalido() {
   const resultado =
     prepararComCliente({
@@ -753,10 +683,6 @@ function validarBloqueioContatoInvalido() {
     'whatsapp-cliente-invalido'
   );
 }
-
-// ============================================================
-// TESTE 12 — LISTA WHATSAPP_NUMEROS_BLOQUEADOS
-// ============================================================
 
 function validarBloqueioPorListaDoAmbiente() {
   const resultado =
@@ -788,18 +714,14 @@ function validarBloqueioPorListaDoAmbiente() {
   );
 
   assert.equal(
-    JSON.stringify(resultado)
-      .includes(
-        '5561988887777'
-      ),
-    false,
-    'O resultado de bloqueio não deve expor o número completo.'
+    JSON.stringify(
+      resultado
+    ).includes(
+      '5561988887777'
+    ),
+    false
   );
 }
-
-// ============================================================
-// TESTE 13 — CLIENTE LEGADO SEM NÚMERO NO MODO DE TESTE
-// ============================================================
 
 function validarCompatibilidadeModoTeste() {
   const resultado =
@@ -825,10 +747,6 @@ function validarCompatibilidadeModoTeste() {
   );
 }
 
-// ============================================================
-// TESTE 14 — NORMALIZAÇÃO DO TEXTO DA META
-// ============================================================
-
 function validarNormalizacao() {
   const valor =
     normalizarParametroMeta(
@@ -837,16 +755,40 @@ function validarNormalizacao() {
 
   assert.equal(
     valor,
-    'A || B C || D'
+    'A • B • C • D'
+  );
+
+  assert.equal(
+    /[\r\n\t\u2028\u2029]/.test(
+      valor
+    ),
+    false
+  );
+
+  assert.equal(
+    valor.includes(
+      '||'
+    ),
+    false
+  );
+
+  assert.equal(
+    / {2,}/.test(
+      valor
+    ),
+    false
+  );
+
+  assert.equal(
+    /(?:•\s*){2,}/.test(
+      valor
+    ),
+    false
   );
 }
 
-// ============================================================
-// TESTE 15 — PRIORIDADE DO NOME COMPLETO DO ENSAIO
-// ============================================================
-
 function validarPrioridadeNomeEnsaio() {
-  const resultadoComNome =
+  const comNome =
     montarPayloadTemplateWhatsApp({
       cliente:
         clienteBase(),
@@ -877,13 +819,13 @@ function validarPrioridadeNomeEnsaio() {
     });
 
   assert.equal(
-    resultadoComNome.ok,
+    comNome.ok,
     true
   );
 
   const detalhesComNome =
     parametroNomeado(
-      resultadoComNome.payload,
+      comNome.payload,
       'detalhes'
     )?.text || '';
 
@@ -899,7 +841,7 @@ function validarPrioridadeNomeEnsaio() {
     false
   );
 
-  const resultadoSemNome =
+  const semNome =
     montarPayloadTemplateWhatsApp({
       cliente:
         clienteBase(),
@@ -930,25 +872,105 @@ function validarPrioridadeNomeEnsaio() {
     });
 
   assert.equal(
-    resultadoSemNome.ok,
+    semNome.ok,
     true
   );
 
-  const detalhesSemNome =
-    parametroNomeado(
-      resultadoSemNome.payload,
-      'detalhes'
-    )?.text || '';
-
   assert.match(
-    detalhesSemNome,
+    parametroNomeado(
+      semNome.payload,
+      'detalhes'
+    )?.text || '',
+
     /\*Ensaio:\* LL/
   );
 }
 
-// ============================================================
-// EXECUÇÃO DO SCRIPT FINAL
-// ============================================================
+function validarPayloadFinalCompativelComMeta() {
+  const resultado =
+    montarPayloadTemplateWhatsApp({
+      cliente:
+        clienteBase(),
+
+      ordem: {
+        osId:
+          'os-payload-meta',
+
+        osNome:
+          'OS PAYLOAD META',
+
+        linhas: [
+          linha({
+            amostra:
+              'CP-01',
+
+            ensaioNome:
+              'Limite de Liquidez',
+          }),
+
+          linha({
+            amostra:
+              'CP-02',
+
+            ensaioNome:
+              'Módulo de Resiliência',
+          }),
+        ],
+      },
+
+      telefone:
+        '5561999999999',
+    });
+
+  assert.equal(
+    resultado.ok,
+    true
+  );
+
+  const detalhes =
+    parametroNomeado(
+      resultado.payload,
+      'detalhes'
+    )?.text || '';
+
+  assert.match(
+    detalhes,
+    /◆ \*1\) Amostra:\* CP-01/
+  );
+
+  assert.match(
+    detalhes,
+    / {2}◆ \*2\) Amostra:\* CP-02/
+  );
+
+  assert.equal(
+    / {3,}/.test(
+      detalhes
+    ),
+    false
+  );
+
+  assert.equal(
+    /[\r\n\t\u2028\u2029]/.test(
+      detalhes
+    ),
+    false
+  );
+
+  assert.equal(
+    / {5,}/.test(
+      detalhes
+    ),
+    false
+  );
+
+  assert.equal(
+    validarPayloadTemplateMeta(
+      resultado.payload
+    ),
+    true
+  );
+}
 
 function executar() {
   validarMensagemPequena();
@@ -966,13 +988,14 @@ function executar() {
   validarCompatibilidadeModoTeste();
   validarNormalizacao();
   validarPrioridadeNomeEnsaio();
+  validarPayloadFinalCompativelComMeta();
 
   console.log(
     'VALIDAÇÃO WHATSAPP: OK'
   );
 
   console.log(
-    'TESTES EXECUTADOS: 15'
+    'TESTES EXECUTADOS: 16'
   );
 
   console.log(

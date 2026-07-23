@@ -1,27 +1,5 @@
 'use strict';
 
-// ============================================================
-// teste_template_whatsapp_producao.js
-// ============================================================
-//
-// Teste controlado do template de produção do WhatsApp.
-//
-// Segurança:
-//
-// - não consulta o Airtable;
-// - não envia e-mail;
-// - não altera o .env;
-// - não ativa cron;
-// - utiliza exclusivamente WHATSAPP_TEST_NUMBER;
-// - valida WABA e Phone Number ID de produção;
-// - valida se o número está registrado na Cloud API;
-// - consulta o status do template antes do envio;
-// - sem argumento, apenas gera uma prévia local;
-// - só envia com --confirmar-envio-real;
-// - bloqueia o envio enquanto o template não estiver APPROVED;
-// - não exibe token nem telefone completo.
-// ============================================================
-
 require('dotenv').config();
 
 const WABA_PRODUCAO_ESPERADA =
@@ -97,7 +75,9 @@ function normalizarTelefone(
   codigoPais = '55'
 ) {
   let numero =
-    somenteDigitos(valor);
+    somenteDigitos(
+      valor
+    );
 
   if (
     numero.length === 10 ||
@@ -121,9 +101,13 @@ function mascararTelefone(
   valor
 ) {
   const numero =
-    somenteDigitos(valor);
+    somenteDigitos(
+      valor
+    );
 
-  if (numero.length <= 4) {
+  if (
+    numero.length <= 4
+  ) {
     return '****';
   }
 
@@ -151,7 +135,9 @@ function mascararId(
     return '';
   }
 
-  if (texto.length <= 14) {
+  if (
+    texto.length <= 14
+  ) {
     return '***';
   }
 
@@ -176,7 +162,10 @@ function listaNumerosBloqueados(
 
   return valor
     .split(/[;,|]/)
-    .map(item => item.trim())
+    .map(
+      item =>
+        item.trim()
+    )
     .filter(Boolean)
     .map(
       item =>
@@ -227,7 +216,9 @@ async function requisitarJson(
     if (texto) {
       try {
         dados =
-          JSON.parse(texto);
+          JSON.parse(
+            texto
+          );
       } catch {
         throw new Error(
           'A Meta retornou uma resposta que não é JSON.'
@@ -235,7 +226,9 @@ async function requisitarJson(
       }
     }
 
-    if (!resposta.ok) {
+    if (
+      !resposta.ok
+    ) {
       const codigo =
         dados?.error?.code ??
         resposta.status;
@@ -301,6 +294,92 @@ function parametroNomeado(
   );
 }
 
+function validarParametrosTextuaisDoPayload(
+  payload
+) {
+  const componentes =
+    payload?.template?.components ||
+    [];
+
+  for (
+    const componente
+    of componentes
+  ) {
+    const parametros =
+      componente?.parameters ||
+      [];
+
+    for (
+      const parametro
+      of parametros
+    ) {
+      const valor =
+        parametro?.type ===
+        'text'
+          ? parametro.text
+          : parametro?.type ===
+            'payload'
+            ? parametro.payload
+            : null;
+
+      if (
+        valor === null
+      ) {
+        continue;
+      }
+
+      exigir(
+        !/[\r\n\t\u2028\u2029]/.test(
+          String(valor)
+        ),
+        'O payload final contém quebra de linha ou tabulação em um parâmetro.'
+      );
+
+      exigir(
+        !/ {5,}/.test(
+          String(valor)
+        ),
+        'O payload final contém mais de quatro espaços consecutivos.'
+      );
+    }
+  }
+}
+
+function validarSeparacaoDosItens(
+  detalhes,
+  quantidadeItens
+) {
+  exigir(
+    !/[\r\n\t\u2028\u2029]/.test(
+      detalhes
+    ),
+    'O parâmetro detalhes contém quebra de linha ou tabulação.'
+  );
+
+  exigir(
+    !/ {3,}/.test(
+      detalhes
+    ),
+    'O parâmetro detalhes contém três ou mais espaços consecutivos.'
+  );
+
+  for (
+    let indice = 2;
+    indice <= quantidadeItens;
+    indice += 1
+  ) {
+    const marcador =
+      `  ◆ *${indice}) Amostra:*`;
+
+    exigir(
+      detalhes.includes(
+        marcador
+      ),
+      `O item ${indice} não está separado por exatamente dois espaços.`
+    );
+  }
+}
+
 function validarPayloadControlado(
   preparado,
   destinoEsperado
@@ -362,7 +441,7 @@ function validarPayloadControlado(
     detalhes.includes(
       '◆ *1) Amostra:* CP-01'
     ),
-    'O primeiro bloco da amostra não foi gerado corretamente.'
+    'O primeiro item não foi gerado corretamente.'
   );
 
   exigir(
@@ -383,7 +462,7 @@ function validarPayloadControlado(
     detalhes.includes(
       '◆ *2) Amostra:* CP-02'
     ),
-    'O segundo bloco da amostra não foi gerado corretamente.'
+    'O segundo item não foi gerado corretamente.'
   );
 
   exigir(
@@ -393,21 +472,13 @@ function validarPayloadControlado(
     'O nome completo do segundo ensaio não foi utilizado.'
   );
 
-  exigir(
-    detalhes.includes(
-      '\n\n\n◆ *2) Amostra:*'
-    ),
-    'A separação entre os blocos não está correta.'
+  validarSeparacaoDosItens(
+    detalhes,
+    preparado.quantidadeItens
   );
 
-  exigir(
-    !detalhes.includes('\r'),
-    'O payload contém retorno de carro indevido.'
-  );
-
-  exigir(
-    !detalhes.includes('\t'),
-    'O payload contém tabulação indevida.'
+  validarParametrosTextuaisDoPayload(
+    preparado.payload
   );
 
   return detalhes;
@@ -521,13 +592,10 @@ async function executar() {
       codigoPais
     );
 
-  const bloqueados =
-    listaNumerosBloqueados(
-      codigoPais
-    );
-
   exigir(
-    !bloqueados.includes(
+    !listaNumerosBloqueados(
+      codigoPais
+    ).includes(
       destinoTeste
     ),
     'WHATSAPP_TEST_NUMBER está na lista de números bloqueados.'
@@ -538,10 +606,8 @@ async function executar() {
 
   const respostaTemplates =
     await requisitarJson(
-      `${baseGraph}/${wabaId}` +
-      '/message_templates' +
-      '?fields=id,name,status,language,category,parameter_format' +
-      '&limit=100',
+      `${baseGraph}/${wabaId}/message_templates` +
+      '?fields=id,name,status,language,category,parameter_format&limit=100',
 
       token
     );
@@ -569,10 +635,8 @@ async function executar() {
 
   const respostaNumeros =
     await requisitarJson(
-      `${baseGraph}/${wabaId}` +
-      '/phone_numbers' +
-      '?fields=id,display_phone_number,verified_name,code_verification_status,platform_type' +
-      '&limit=100',
+      `${baseGraph}/${wabaId}/phone_numbers` +
+      '?fields=id,display_phone_number,verified_name,code_verification_status,platform_type&limit=100',
 
       token
     );
@@ -584,7 +648,7 @@ async function executar() {
     ).find(
       numero =>
         numero.id ===
-          phoneNumberId
+        phoneNumberId
     );
 
   exigir(
@@ -662,9 +726,6 @@ async function executar() {
     return;
   }
 
-  // Alterações apenas em memória.
-  //
-  // O arquivo .env não será modificado.
   process.env.WHATSAPP_ATIVO =
     'true';
 
@@ -679,8 +740,6 @@ async function executar() {
   process.env.WHATSAPP_LOG_PAYLOAD =
     'false';
 
-  // O require ocorre somente depois das travas e das
-  // configurações controladas acima.
   const {
     prepararEnvioWhatsAppDaOS,
     enviarWhatsAppDaOS,
@@ -784,7 +843,9 @@ async function executar() {
       destinoTeste
     );
 
-  if (!envioRealSolicitado) {
+  if (
+    !envioRealSolicitado
+  ) {
     console.log(
       JSON.stringify(
         {
@@ -829,16 +890,20 @@ async function executar() {
             ),
 
           quantidadeItens:
-            preparado.quantidadeItens,
+            preparado
+              .quantidadeItens,
 
           formatoDetalhes:
-            preparado.formatoDetalhes,
+            preparado
+              .formatoDetalhes,
 
           tamanhoCorpoEstimado:
-            preparado.tamanhoCorpoEstimado,
+            preparado
+              .tamanhoCorpoEstimado,
 
           limiteCorpo:
-            preparado.limiteCorpo,
+            preparado
+              .limiteCorpo,
 
           detalhes,
         },
@@ -902,16 +967,20 @@ async function executar() {
           ),
 
         quantidadeItens:
-          resultado.quantidadeItens,
+          resultado
+            .quantidadeItens,
 
         formatoDetalhes:
-          resultado.formatoDetalhes,
+          resultado
+            .formatoDetalhes,
 
         tamanhoCorpoEstimado:
-          resultado.tamanhoCorpoEstimado,
+          resultado
+            .tamanhoCorpoEstimado,
 
         limiteCorpo:
-          resultado.limiteCorpo,
+          resultado
+            .limiteCorpo,
       },
       null,
       2
