@@ -1,8 +1,12 @@
 'use strict';
 
-require('dotenv').config();
+process.env.DOTENV_CONFIG_QUIET = 'true';
+require('dotenv').config({ quiet: true });
 
 const { statusExibido } = require('./email_template.js');
+
+const MARCADOR_ITEM = '◆';
+const SEPARADOR_VISUAL_ITENS = '  ';
 
 function textoEnv(nome, padrao = '') {
   return String(process.env[nome] ?? padrao).trim();
@@ -10,6 +14,7 @@ function textoEnv(nome, padrao = '') {
 
 function inteiroPositivo(valor, padrao) {
   const numero = Number.parseInt(String(valor ?? ''), 10);
+
   return Number.isInteger(numero) && numero > 0
     ? numero
     : padrao;
@@ -17,118 +22,99 @@ function inteiroPositivo(valor, padrao) {
 
 function inteiroNaoNegativo(valor, padrao) {
   const numero = Number.parseInt(String(valor ?? ''), 10);
+
   return Number.isInteger(numero) && numero >= 0
     ? numero
     : padrao;
 }
 
 const CONFIG = Object.freeze({
-  templateName:
-    textoEnv('WHATSAPP_TEMPLATE_NAME'),
+  templateName: textoEnv(
+    'WHATSAPP_TEMPLATE_NAME'
+  ),
 
-  templateLanguage:
-    textoEnv(
-      'WHATSAPP_TEMPLATE_LANGUAGE',
-      'pt_BR'
-    ),
+  templateLanguage: textoEnv(
+    'WHATSAPP_TEMPLATE_LANGUAGE',
+    'pt_BR'
+  ),
 
-  parameterMode:
-    textoEnv(
-      'WHATSAPP_TEMPLATE_PARAMETER_MODE',
-      'named'
-    ).toLowerCase(),
+  parameterMode: textoEnv(
+    'WHATSAPP_TEMPLATE_PARAMETER_MODE',
+    'named'
+  ).toLowerCase(),
 
-  bodyParameters:
-    textoEnv(
-      'WHATSAPP_TEMPLATE_BODY_PARAMETERS',
-      'ordem_servico,detalhes'
-    ),
+  bodyParameters: textoEnv(
+    'WHATSAPP_TEMPLATE_BODY_PARAMETERS',
+    'ordem_servico,detalhes'
+  ),
 
-  detailsFormat:
-    textoEnv(
-      'WHATSAPP_FORMATO_DETALHES',
-      'auto'
-    ).toLowerCase(),
+  detailsFormat: textoEnv(
+    'WHATSAPP_FORMATO_DETALHES',
+    'auto'
+  ).toLowerCase(),
 
-  detailsMaxChars:
-    inteiroPositivo(
-      process.env.WHATSAPP_DETALHES_MAX_CHARS,
-      800
-    ),
+  detailsMaxChars: inteiroPositivo(
+    process.env.WHATSAPP_DETALHES_MAX_CHARS,
+    800
+  ),
 
-  templateBodyMaxChars:
-    inteiroPositivo(
-      process.env.WHATSAPP_TEMPLATE_BODY_MAX_CHARS,
-      1024
-    ),
+  templateBodyMaxChars: inteiroPositivo(
+    process.env.WHATSAPP_TEMPLATE_BODY_MAX_CHARS,
+    1024
+  ),
 
-  templateBodyFixedChars:
-    inteiroNaoNegativo(
-      process.env.WHATSAPP_TEMPLATE_BODY_FIXED_CHARS,
-      306
-    ),
+  templateBodyFixedChars: inteiroNaoNegativo(
+    process.env.WHATSAPP_TEMPLATE_BODY_FIXED_CHARS,
+    306
+  ),
 
-  templateBodySafetyMargin:
-    inteiroNaoNegativo(
-      process.env.WHATSAPP_TEMPLATE_BODY_SAFETY_MARGIN,
-      20
-    ),
+  templateBodySafetyMargin: inteiroNaoNegativo(
+    process.env.WHATSAPP_TEMPLATE_BODY_SAFETY_MARGIN,
+    20
+  ),
 
-  headerType:
-    textoEnv(
-      'WHATSAPP_TEMPLATE_HEADER_TYPE',
-      'none'
-    ).toLowerCase(),
+  headerType: textoEnv(
+    'WHATSAPP_TEMPLATE_HEADER_TYPE',
+    'none'
+  ).toLowerCase(),
 
-  headerTextSource:
-    textoEnv(
-      'WHATSAPP_TEMPLATE_HEADER_TEXT_SOURCE'
-    ),
+  headerTextSource: textoEnv(
+    'WHATSAPP_TEMPLATE_HEADER_TEXT_SOURCE'
+  ),
 
-  headerTextParameterName:
-    textoEnv(
-      'WHATSAPP_TEMPLATE_HEADER_TEXT_PARAMETER_NAME'
-    ),
+  headerTextParameterName: textoEnv(
+    'WHATSAPP_TEMPLATE_HEADER_TEXT_PARAMETER_NAME'
+  ),
 
-  headerMediaId:
-    textoEnv(
-      'WHATSAPP_TEMPLATE_HEADER_MEDIA_ID'
-    ),
+  headerMediaId: textoEnv(
+    'WHATSAPP_TEMPLATE_HEADER_MEDIA_ID'
+  ),
 
-  headerMediaUrl:
-    textoEnv(
-      'WHATSAPP_TEMPLATE_HEADER_MEDIA_URL'
-    ),
+  headerMediaUrl: textoEnv(
+    'WHATSAPP_TEMPLATE_HEADER_MEDIA_URL'
+  ),
 
-  headerDocumentFilename:
-    textoEnv(
-      'WHATSAPP_TEMPLATE_HEADER_DOCUMENT_FILENAME'
-    ),
+  headerDocumentFilename: textoEnv(
+    'WHATSAPP_TEMPLATE_HEADER_DOCUMENT_FILENAME'
+  ),
 
-  buttons:
-    textoEnv(
-      'WHATSAPP_TEMPLATE_BUTTONS'
-    ),
+  buttons: textoEnv(
+    'WHATSAPP_TEMPLATE_BUTTONS'
+  ),
 });
 
-function limparTexto(
-  valor,
-  fallback = ''
-) {
-  const texto =
-    String(valor ?? '')
-      .replace(/\r\n|\r/g, '\n')
-      .replace(/[\t ]+/g, ' ')
-      .replace(/ *\n */g, '\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
+function limparTexto(valor, fallback = '') {
+  const resultado = String(valor ?? '')
+    .replace(/\r\n|\r/g, '\n')
+    .replace(/[\t ]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 
-  return texto || fallback;
+  return resultado || fallback;
 }
 
-function normalizarParametroMeta(
-  valor
-) {
+function normalizarParametroMeta(valor) {
   return String(valor ?? '')
     .normalize('NFKC')
     .replace(
@@ -143,10 +129,7 @@ function normalizarParametroMeta(
       /(?:\s*(?:\|\||•)\s*)+/g,
       ' • '
     )
-    .replace(
-      / {3,}/g,
-      '  '
-    )
+    .replace(/ {3,}/g, '  ')
     .replace(
       /^(?:\s*•\s*)+|(?:\s*•\s*)+$/g,
       ''
@@ -154,45 +137,19 @@ function normalizarParametroMeta(
     .trim();
 }
 
-function normalizarParametroMetaMultilinha(
-  valor
-) {
-  return String(valor ?? '')
-    .replace(/\r\n|\r/g, '\n')
-    .replace(
-      /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
-      ' '
-    )
-    .replace(/\t+/g, ' ')
-    .split('\n')
-    .map(
-      linha =>
-        linha
-          .replace(
-            / {3,}/g,
-            '  '
-          )
-          .trim()
-    )
-    .join('\n')
-    .replace(
-      /\n{4,}/g,
-      '\n\n\n'
-    )
-    .trim();
+// Mantida por compatibilidade.
+// A Meta não permite quebras dentro dos parâmetros.
+function normalizarParametroMetaMultilinha(valor) {
+  return normalizarParametroMeta(valor);
 }
 
-function parametroMetaPossuiCaracterProibido(
-  valor
-) {
+function parametroMetaPossuiCaracterProibido(valor) {
   return /[\r\n\t\u2028\u2029]/.test(
     String(valor ?? '')
   );
 }
 
-function parametroMetaPossuiEspacosExcessivos(
-  valor
-) {
+function parametroMetaPossuiEspacosExcessivos(valor) {
   return / {5,}/.test(
     String(valor ?? '')
   );
@@ -202,10 +159,9 @@ function validarTextoParametroMeta(
   valor,
   identificacao = 'parâmetro'
 ) {
-  const texto =
-    String(valor ?? '');
+  const resultado = String(valor ?? '');
 
-  if (!texto.trim()) {
+  if (!resultado.trim()) {
     throw new Error(
       `${identificacao} ficou vazio.`
     );
@@ -213,7 +169,7 @@ function validarTextoParametroMeta(
 
   if (
     parametroMetaPossuiCaracterProibido(
-      texto
+      resultado
     )
   ) {
     throw new Error(
@@ -223,7 +179,7 @@ function validarTextoParametroMeta(
 
   if (
     parametroMetaPossuiEspacosExcessivos(
-      texto
+      resultado
     )
   ) {
     throw new Error(
@@ -231,12 +187,10 @@ function validarTextoParametroMeta(
     );
   }
 
-  return texto;
+  return resultado;
 }
 
-function validarPayloadTemplateMeta(
-  payload
-) {
+function validarPayloadTemplateMeta(payload) {
   const componentes =
     payload?.template?.components;
 
@@ -246,65 +200,46 @@ function validarPayloadTemplateMeta(
     );
   }
 
-  for (
-    const componente
-    of componentes
-  ) {
-    const parametros =
-      Array.isArray(
-        componente?.parameters
-      )
-        ? componente.parameters
-        : [];
+  for (const componente of componentes) {
+    const parametros = Array.isArray(
+      componente?.parameters
+    )
+      ? componente.parameters
+      : [];
 
-    for (
-      let indice = 0;
-      indice < parametros.length;
-      indice += 1
-    ) {
-      const parametro =
-        parametros[indice];
+    parametros.forEach(
+      (parametro, indice) => {
+        const identificacao =
+          `Componente ${componente?.type || 'desconhecido'}, ` +
+          `parâmetro ${indice + 1}`;
 
-      const identificacao =
-        `Componente ${componente?.type || 'desconhecido'}, ` +
-        `parâmetro ${indice + 1}`;
+        if (parametro?.type === 'text') {
+          validarTextoParametroMeta(
+            parametro.text,
+            identificacao
+          );
+        }
 
-      if (
-        parametro?.type ===
-        'text'
-      ) {
-        validarTextoParametroMeta(
-          parametro.text,
-          identificacao
-        );
+        if (parametro?.type === 'payload') {
+          validarTextoParametroMeta(
+            parametro.payload,
+            identificacao
+          );
+        }
       }
-
-      if (
-        parametro?.type ===
-        'payload'
-      ) {
-        validarTextoParametroMeta(
-          parametro.payload,
-          identificacao
-        );
-      }
-    }
+    );
   }
 
   return true;
 }
 
-function contarCaracteres(
-  valor
-) {
+function contarCaracteres(valor) {
   return Array.from(
     String(valor ?? '')
   ).length;
 }
 
-function urlHttpsValida(
-  valor
-) {
+function urlHttpsValida(valor) {
   try {
     return new URL(
       String(valor ?? '').trim()
@@ -314,9 +249,7 @@ function urlHttpsValida(
   }
 }
 
-function garantirModoParametros(
-  modo
-) {
+function garantirModoParametros(modo) {
   if (
     ![
       'named',
@@ -331,9 +264,7 @@ function garantirModoParametros(
   return modo;
 }
 
-function garantirFormatoDetalhes(
-  formato
-) {
+function garantirFormatoDetalhes(formato) {
   if (
     ![
       'auto',
@@ -349,9 +280,7 @@ function garantirFormatoDetalhes(
   return formato;
 }
 
-function garantirTipoCabecalho(
-  tipo
-) {
+function garantirTipoCabecalho(tipo) {
   if (
     ![
       'none',
@@ -369,79 +298,61 @@ function garantirTipoCabecalho(
   return tipo;
 }
 
-function itensDaOS(
-  ordem
-) {
-  const linhas =
-    Array.isArray(
-      ordem?.linhas
-    )
-      ? ordem.linhas
-      : [];
+function itensDaOS(ordem) {
+  const linhas = Array.isArray(
+    ordem?.linhas
+  )
+    ? ordem.linhas
+    : [];
 
-  const vistos =
-    new Set();
-
+  const vistos = new Set();
   const itens = [];
 
-  for (
-    const linha
-    of linhas
-  ) {
-    const amostra =
-      limparTexto(
-        linha?.amostra,
-        '-'
-      );
+  for (const linha of linhas) {
+    const amostra = limparTexto(
+      linha?.amostra,
+      '-'
+    );
 
-    const ensaioNome =
-      limparTexto(
-        linha?.ensaioNome
-      );
+    const ensaioNome = limparTexto(
+      linha?.ensaioNome
+    );
 
-    const ensaioSigla =
-      limparTexto(
-        linha?.ensaioSigla
-      );
+    const ensaioSigla = limparTexto(
+      linha?.ensaioSigla
+    );
 
-    const ensaio =
-      limparTexto(
-        ensaioNome ||
-          ensaioSigla,
-        '-'
-      );
+    const ensaio = limparTexto(
+      ensaioNome || ensaioSigla,
+      '-'
+    );
 
-    const ensaioCurto =
-      limparTexto(
-        ensaioNome ||
-          ensaioSigla ||
-          ensaio,
-        '-'
-      );
-
-    const status =
-      limparTexto(
-        statusExibido(
-          linha?.status
-        ),
-        '-'
-      );
-
-    const chave =
-      [
-        amostra,
+    const ensaioCurto = limparTexto(
+      ensaioNome ||
+        ensaioSigla ||
         ensaio,
-        status,
-      ]
-        .map(
-          item =>
-            item.toLowerCase()
-        )
-        .join('|');
+      '-'
+    );
 
-    if (
-      vistos.has(chave)
-    ) {
+    const status = limparTexto(
+      statusExibido(
+        linha?.status
+      ),
+      '-'
+    );
+
+    const chave = [
+      amostra,
+      ensaio,
+      status,
+    ]
+      .map(
+        item =>
+          item.toLowerCase()
+      )
+      .join('|');
+
+    if (vistos.has(chave)) {
       continue;
     }
 
@@ -455,45 +366,43 @@ function itensDaOS(
       ensaioCurto,
       status,
 
-      recordId:
-        limparTexto(
-          linha?.recordId
-        ),
+      recordId: limparTexto(
+        linha?.recordId
+      ),
 
-      idTrabalho:
-        limparTexto(
-          linha?.idTrabalho
-        ),
+      idTrabalho: limparTexto(
+        linha?.idTrabalho
+      ),
     });
   }
 
   return itens;
 }
 
-function detalhesEmBlocos(
-  itens
-) {
+function detalhesEmBlocos(itens) {
   return itens
     .map(
       (item, indice) =>
         [
-          `◆ *${indice + 1}) Amostra:* ${item.amostra}`,
+          `${MARCADOR_ITEM} *${indice + 1}) Amostra:* ${item.amostra}`,
           `*Ensaio:* ${item.ensaioCurto}`,
           `*Status:* ${item.status}`,
         ].join(' • ')
     )
-    .join('  ');
+    .join(
+      SEPARADOR_VISUAL_ITENS
+    );
 }
 
 function validarEstruturaDetalhesEmBlocos(
-  texto,
+  valor,
   quantidadeItens
 ) {
   const detalhes =
-    String(texto ?? '');
+    String(valor ?? '');
 
   if (
-    /[\r\n\t\u2028\u2029]/.test(
+    parametroMetaPossuiCaracterProibido(
       detalhes
     )
   ) {
@@ -503,30 +412,26 @@ function validarEstruturaDetalhesEmBlocos(
   }
 
   if (
-    / {3,}/.test(
+    parametroMetaPossuiEspacosExcessivos(
       detalhes
     )
   ) {
     throw new Error(
-      'Os detalhes em blocos contêm mais de dois espaços consecutivos.'
+      'Os detalhes em blocos contêm espaços excessivos.'
     );
   }
 
   for (
-    let indice = 2;
+    let indice = 1;
     indice <= quantidadeItens;
     indice += 1
   ) {
     const marcador =
-      `  ◆ *${indice}) Amostra:*`;
+      `${MARCADOR_ITEM} *${indice}) Amostra:*`;
 
-    if (
-      !detalhes.includes(
-        marcador
-      )
-    ) {
+    if (!detalhes.includes(marcador)) {
       throw new Error(
-        `A separação visual antes do item ${indice} está incorreta.`
+        `O marcador do item ${indice} está ausente.`
       );
     }
   }
@@ -534,72 +439,52 @@ function validarEstruturaDetalhesEmBlocos(
   return true;
 }
 
-function compactarPrefixoComum(
-  valores
-) {
-  const lista =
-    [...valores].map(
-      valor =>
-        limparTexto(
-          valor,
-          '-'
-        )
-    );
+function compactarPrefixoComum(valores) {
+  const lista = [...valores].map(
+    valor =>
+      limparTexto(
+        valor,
+        '-'
+      )
+  );
 
-  if (
-    lista.length < 2
-  ) {
+  if (lista.length < 2) {
     return lista.join('; ');
   }
 
-  let prefixo =
-    lista[0];
+  let prefixo = lista[0];
 
-  for (
-    const valor
-    of lista.slice(1)
-  ) {
+  for (const valor of lista.slice(1)) {
     while (
       prefixo &&
-      !valor.startsWith(
-        prefixo
-      )
+      !valor.startsWith(prefixo)
     ) {
       prefixo =
-        prefixo.slice(
-          0,
-          -1
-        );
+        prefixo.slice(0, -1);
     }
   }
 
   const ultimoEspaco =
     prefixo.lastIndexOf(' ');
 
-  if (
-    ultimoEspaco < 3
-  ) {
+  if (ultimoEspaco < 3) {
     return lista.join('; ');
   }
 
-  prefixo =
-    prefixo.slice(
-      0,
-      ultimoEspaco + 1
-    );
+  prefixo = prefixo.slice(
+    0,
+    ultimoEspaco + 1
+  );
 
   const rotulo =
     prefixo.trim();
 
-  const sufixos =
-    lista.map(
-      valor =>
-        valor
-          .slice(
-            prefixo.length
-          )
-          .trim()
-    );
+  const sufixos = lista.map(
+    valor =>
+      valor
+        .slice(prefixo.length)
+        .trim()
+  );
 
   if (
     !rotulo ||
@@ -622,39 +507,28 @@ function compactarPrefixoComum(
     : original;
 }
 
-function detalhesCompactos(
-  itens
-) {
-  const porAmostra =
-    new Map();
+function detalhesCompactos(itens) {
+  const porAmostra = new Map();
+  const porEnsaio = new Map();
 
-  const porEnsaio =
-    new Map();
+  for (const item of itens) {
+    const ensaioCurto = limparTexto(
+      item.ensaioCurto ||
+        item.ensaioSigla ||
+        item.ensaioNome ||
+        item.ensaio,
+      '-'
+    );
 
-  for (
-    const item
-    of itens
-  ) {
-    const ensaioCurto =
-      limparTexto(
-        item.ensaioCurto ||
-          item.ensaioSigla ||
-          item.ensaioNome ||
-          item.ensaio,
-        '-'
-      );
+    const chaveAmostra = [
+      item.amostra,
+      item.status,
+    ].join('\u0000');
 
-    const chaveAmostra =
-      [
-        item.amostra,
-        item.status,
-      ].join('\u0000');
-
-    const chaveEnsaio =
-      [
-        ensaioCurto,
-        item.status,
-      ].join('\u0000');
+    const chaveEnsaio = [
+      ensaioCurto,
+      item.status,
+    ].join('\u0000');
 
     if (
       !porAmostra.has(
@@ -664,14 +538,9 @@ function detalhesCompactos(
       porAmostra.set(
         chaveAmostra,
         {
-          amostra:
-            item.amostra,
-
-          status:
-            item.status,
-
-          ensaios:
-            new Set(),
+          amostra: item.amostra,
+          status: item.status,
+          ensaios: new Set(),
         }
       );
     }
@@ -689,14 +558,9 @@ function detalhesCompactos(
       porEnsaio.set(
         chaveEnsaio,
         {
-          ensaio:
-            ensaioCurto,
-
-          status:
-            item.status,
-
-          amostras:
-            new Set(),
+          ensaio: ensaioCurto,
+          status: item.status,
+          amostras: new Set(),
         }
       );
     }
@@ -715,15 +579,14 @@ function detalhesCompactos(
           `${[...grupo.ensaios].join('; ')} ` +
           `(${grupo.status})`
       )
-      .join('\n');
+      .join(
+        SEPARADOR_VISUAL_ITENS
+      );
 
   const secoesPorStatus =
     new Map();
 
-  for (
-    const grupo
-    of porEnsaio.values()
-  ) {
+  for (const grupo of porEnsaio.values()) {
     if (
       !secoesPorStatus.has(
         grupo.status
@@ -749,10 +612,12 @@ function detalhesCompactos(
     [...secoesPorStatus.entries()]
       .map(
         ([status, linhas]) =>
-          `Status: ${status}\n` +
-          `${linhas.join('\n')}`
+          `Status: ${status} • ` +
+          `${linhas.join(' • ')}`
       )
-      .join('\n\n');
+      .join(
+        SEPARADOR_VISUAL_ITENS
+      );
 
   return textoPorEnsaio.length <
     textoPorAmostra.length
@@ -871,15 +736,11 @@ function escolherDetalhes(
       ordemServico,
     });
 
-  if (
-    formato === 'blocos'
-  ) {
+  if (formato === 'blocos') {
     return blocos;
   }
 
-  if (
-    formato === 'compacto'
-  ) {
+  if (formato === 'compacto') {
     return compacto;
   }
 
@@ -900,9 +761,7 @@ function montarVariaveisDaOS(
       ordem
     );
 
-  if (
-    itens.length === 0
-  ) {
+  if (itens.length === 0) {
     return {
       ok:
         false,
@@ -1007,11 +866,10 @@ function montarVariaveisDaOS(
         ),
 
       detalhes:
-        detalhesResultado
-          .texto,
+        detalhesResultado.texto,
 
       itens_compactos:
-        normalizarParametroMetaMultilinha(
+        normalizarParametroMeta(
           detalhesCompactos(
             itens
           )
@@ -1023,7 +881,9 @@ function montarVariaveisDaOS(
             item =>
               item.amostra
           )
-          .join('\n'),
+          .join(
+            SEPARADOR_VISUAL_ITENS
+          ),
 
       ensaios:
         itens
@@ -1031,7 +891,9 @@ function montarVariaveisDaOS(
             item =>
               item.ensaio
           )
-          .join('\n'),
+          .join(
+            SEPARADOR_VISUAL_ITENS
+          ),
 
       status:
         itens
@@ -1039,7 +901,9 @@ function montarVariaveisDaOS(
             item =>
               item.status
           )
-          .join('\n'),
+          .join(
+            SEPARADOR_VISUAL_ITENS
+          ),
 
       cliente:
         clienteNome,
@@ -1095,10 +959,7 @@ function montarVariaveisDaOS(
 
 function resolverValor(
   origem,
-  contexto,
-  {
-    preservarQuebras = false,
-  } = {}
+  contexto
 ) {
   const referencia =
     limparTexto(
@@ -1121,13 +982,18 @@ function resolverValor(
         'literal:'.length
       );
 
-    return preservarQuebras
-      ? normalizarParametroMetaMultilinha(
-          literal
-        )
-      : limparTexto(
-          literal
-        );
+    const valor =
+      normalizarParametroMeta(
+        literal
+      );
+
+    if (!valor) {
+      throw new Error(
+        'O valor literal do parâmetro está vazio.'
+      );
+    }
+
+    return valor;
   }
 
   if (
@@ -1144,13 +1010,9 @@ function resolverValor(
   }
 
   const valor =
-    preservarQuebras
-      ? normalizarParametroMetaMultilinha(
-          contexto[referencia]
-        )
-      : limparTexto(
-          contexto[referencia]
-        );
+    normalizarParametroMeta(
+      contexto[referencia]
+    );
 
   if (!valor) {
     throw new Error(
@@ -1159,22 +1021,6 @@ function resolverValor(
   }
 
   return valor;
-}
-
-function origemPermiteMultilinha(
-  origem
-) {
-  return new Set([
-    'detalhes',
-    'itens_compactos',
-    'amostras',
-    'ensaios',
-    'status',
-  ]).has(
-    limparTexto(
-      origem
-    )
-  );
 }
 
 function analisarMapeamentoCorpo() {
@@ -1187,9 +1033,7 @@ function analisarMapeamentoCorpo() {
       )
       .filter(Boolean);
 
-  if (
-    itens.length === 0
-  ) {
+  if (itens.length === 0) {
     throw new Error(
       'WHATSAPP_TEMPLATE_BODY_PARAMETERS não possui parâmetros.'
     );
@@ -1200,9 +1044,7 @@ function analisarMapeamentoCorpo() {
       const separador =
         item.indexOf('=');
 
-      if (
-        separador === -1
-      ) {
+      if (separador === -1) {
         return {
           parameterName:
             item,
@@ -1255,25 +1097,14 @@ function montarParametrosDoCorpo(
   return analisarMapeamentoCorpo()
     .map(
       mapeamento => {
-        const valorResolvido =
+        const texto =
           resolverValor(
             mapeamento.source,
-            contexto,
-            {
-              preservarQuebras:
-                origemPermiteMultilinha(
-                  mapeamento.source
-                ),
-            }
-          );
-
-        const textoNormalizado =
-          normalizarParametroMeta(
-            valorResolvido
+            contexto
           );
 
         validarTextoParametroMeta(
-          textoNormalizado,
+          texto,
           `Parâmetro "${mapeamento.parameterName}"`
         );
 
@@ -1282,12 +1113,10 @@ function montarParametrosDoCorpo(
             'text',
 
           text:
-            textoNormalizado,
+            texto,
         };
 
-        if (
-          modo === 'named'
-        ) {
+        if (modo === 'named') {
           parametro.parameter_name =
             mapeamento.parameterName;
         }
@@ -1305,29 +1134,21 @@ function montarComponenteCabecalho(
       CONFIG.headerType
     );
 
-  if (
-    tipo === 'none'
-  ) {
+  if (tipo === 'none') {
     return null;
   }
 
-  if (
-    tipo === 'text'
-  ) {
-    if (
-      !CONFIG.headerTextSource
-    ) {
+  if (tipo === 'text') {
+    if (!CONFIG.headerTextSource) {
       throw new Error(
         'Defina WHATSAPP_TEMPLATE_HEADER_TEXT_SOURCE para o cabeçalho de texto.'
       );
     }
 
     const texto =
-      normalizarParametroMeta(
-        resolverValor(
-          CONFIG.headerTextSource,
-          contexto
-        )
+      resolverValor(
+        CONFIG.headerTextSource,
+        contexto
       );
 
     validarTextoParametroMeta(
@@ -1365,9 +1186,7 @@ function montarComponenteCabecalho(
 
   const midia = {};
 
-  if (
-    CONFIG.headerMediaId
-  ) {
+  if (CONFIG.headerMediaId) {
     midia.id =
       CONFIG.headerMediaId;
   } else if (
@@ -1420,9 +1239,7 @@ function montarComponenteCabecalho(
 function montarComponentesBotoes(
   contexto
 ) {
-  if (
-    !CONFIG.buttons
-  ) {
+  if (!CONFIG.buttons) {
     return [];
   }
 
@@ -1440,9 +1257,7 @@ function montarComponentesBotoes(
             definicao
           );
 
-        if (
-          !correspondencia
-        ) {
+        if (!correspondencia) {
           throw new Error(
             `Botão inválido em WHATSAPP_TEMPLATE_BUTTONS: ${definicao}`
           );
@@ -1456,11 +1271,9 @@ function montarComponentesBotoes(
         ] = correspondencia;
 
         const valor =
-          normalizarParametroMeta(
-            resolverValor(
-              origem,
-              contexto
-            )
+          resolverValor(
+            origem,
+            contexto
           );
 
         validarTextoParametroMeta(
@@ -1469,8 +1282,7 @@ function montarComponentesBotoes(
         );
 
         const parametro =
-          subtipo ===
-          'quick_reply'
+          subtipo === 'quick_reply'
             ? {
                 type:
                   'payload',
@@ -1574,9 +1386,7 @@ function montarPayloadTemplateWhatsApp({
         ordem
       );
 
-    if (
-      !variaveis.ok
-    ) {
+    if (!variaveis.ok) {
       return variaveis;
     }
 
@@ -1726,6 +1536,9 @@ module.exports = {
 
   contarCaracteres,
   estimarTamanhoCorpoFinal,
+
+  MARCADOR_ITEM,
+  SEPARADOR_VISUAL_ITENS,
 
   CONFIG,
 };

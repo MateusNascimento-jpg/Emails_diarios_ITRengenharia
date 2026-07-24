@@ -1,18 +1,22 @@
 'use strict';
 
-// Teste controlado usando o cliente e a OS de teste do Airtable.
-// Sem argumento: apenas prévia.
-// Com --confirmar-envio-real: envia somente a OS fixa abaixo.
+// Usa dois itens reais do Airtable para testar a separação visual.
+// O destino continua exclusivamente sendo o cliente TESTE 1 - SISTEMA.
+// Não altera registros no Airtable.
+//
+// Sem argumento: prévia segura.
+// Com --confirmar-envio-real: envia ao telefone controlado.
 
-require('dotenv').config();
+process.env.DOTENV_CONFIG_QUIET = 'true';
+require('dotenv').config({ quiet: true });
 
 const ALVO = Object.freeze({
   clienteId: 'rec2FXoUxhQ3qKgbE',
   clienteNome: 'TESTE 1 - SISTEMA',
-  osId: 'recOybdpjpk5HKPl7',
-  osNome: 'TESTE 2 SISTEMA',
+  osNomeTeste: 'TESTE VISUAL SISTEMA',
   prefixoTelefone: '5561',
-  sufixoTelefone: '8001',
+  sufixoTelefone: '2746',
+  quantidadeItens: 2,
 });
 
 const ENVIO_REAL = process.argv.includes(
@@ -32,11 +36,14 @@ function texto(valor) {
 }
 
 function digitos(valor) {
-  return String(valor ?? '').replace(/\D/g, '');
+  return String(valor ?? '')
+    .replace(/\D/g, '');
 }
 
 function envBooleano(nome, padrao = false) {
-  const valor = texto(process.env[nome]).toLowerCase();
+  const valor = texto(
+    process.env[nome]
+  ).toLowerCase();
 
   if (!valor) {
     return padrao;
@@ -82,6 +89,95 @@ function mascararId(valor) {
     : `${id.slice(0, 8)}...${id.slice(-6)}`;
 }
 
+function criarIdExecucao() {
+  return new Date()
+    .toISOString()
+    .replace(/\D/g, '')
+    .slice(0, 17);
+}
+
+function selecionarItensReais({
+  clientes,
+  itensDaOS,
+  quantidade,
+}) {
+  const linhasSelecionadas = [];
+  const origens = [];
+  let quantidadeAtual = 0;
+
+  for (const cliente of clientes) {
+    const ordens = Array.isArray(
+      cliente?.ordens
+    )
+      ? cliente.ordens
+      : [];
+
+    for (const ordem of ordens) {
+      const linhas = Array.isArray(
+        ordem?.linhas
+      )
+        ? ordem.linhas
+        : [];
+
+      for (const linha of linhas) {
+        const tentativa = [
+          ...linhasSelecionadas,
+          {
+            ...linha,
+          },
+        ];
+
+        const itensTentativa = itensDaOS({
+          linhas: tentativa,
+        });
+
+        if (
+          itensTentativa.length <=
+          quantidadeAtual
+        ) {
+          continue;
+        }
+
+        linhasSelecionadas.push({
+          ...linha,
+        });
+
+        origens.push({
+          cliente:
+            texto(
+              cliente?.clienteNome
+            ),
+
+          ordemServico:
+            texto(
+              ordem?.osNome ||
+              ordem?.osId
+            ),
+        });
+
+        quantidadeAtual =
+          itensTentativa.length;
+
+        if (
+          quantidadeAtual >= quantidade
+        ) {
+          return {
+            linhas:
+              linhasSelecionadas,
+
+            origens,
+          };
+        }
+      }
+    }
+  }
+
+  return {
+    linhas: [],
+    origens: [],
+  };
+}
+
 async function executar() {
   exigir(
     !envBooleano('CRON_ATIVO'),
@@ -93,94 +189,78 @@ async function executar() {
   } = require('./airtable.js');
 
   console.log(
-    '[Teste Airtable] Localizando o cliente e a OS controlados...'
+    '[Teste Visual] Consultando itens reais do Airtable...'
   );
 
-  const clientes = await buscarResumoDiario({
-    ignorarData: true,
-    modoAuditoria: true,
-    ignorarCorteAutomacao: true,
-  });
-
-  const candidatosCliente = clientes.filter(
-    item =>
-      item?.clienteId === ALVO.clienteId
-  );
+  const clientes =
+    await buscarResumoDiario({
+      ignorarData: true,
+      modoAuditoria: true,
+      ignorarCorteAutomacao: true,
+    });
 
   exigir(
-    candidatosCliente.length === 1,
+    Array.isArray(clientes),
+    'O Airtable não retornou uma lista válida.'
+  );
+
+  const candidatosTeste =
+    clientes.filter(
+      cliente =>
+        cliente?.clienteId ===
+        ALVO.clienteId
+    );
+
+  exigir(
+    candidatosTeste.length === 1,
     'O cliente de teste não foi encontrado de forma única.'
   );
 
-  const cliente = candidatosCliente[0];
+  const clienteTeste =
+    candidatosTeste[0];
 
   exigir(
-    texto(cliente?.clienteNome) ===
-      ALVO.clienteNome,
-    'O nome do cliente não corresponde ao alvo controlado.'
-  );
-
-  const ordens = Array.isArray(
-    cliente?.ordens
-  )
-    ? cliente.ordens
-    : [];
-
-  const candidatasOs = ordens.filter(
-    item =>
-      item?.osId === ALVO.osId
+    texto(
+      clienteTeste?.clienteNome
+    ) === ALVO.clienteNome,
+    'O nome do cliente de teste está incorreto.'
   );
 
   exigir(
-    candidatasOs.length === 1,
-    'A OS de teste não foi encontrada de forma única.'
-  );
-
-  const ordem = candidatasOs[0];
-
-  exigir(
-    texto(ordem?.osNome) ===
-      ALVO.osNome,
-    'O nome da OS não corresponde ao alvo controlado.'
-  );
-
-  exigir(
-    Array.isArray(ordem?.linhas) &&
-      ordem.linhas.length === 1,
-    'A OS de teste deve possuir exatamente um item.'
-  );
-
-  exigir(
-    cliente?.whatsappAmbiguo !== true &&
-      cliente?.whatsappBloqueado !== true &&
-      cliente?.whatsappDuplicadoEntreClientes !== true,
-    'O WhatsApp do cliente de teste não está seguro para envio.'
+    clienteTeste?.whatsappAmbiguo !== true &&
+      clienteTeste?.whatsappBloqueado !== true &&
+      clienteTeste
+        ?.whatsappDuplicadoEntreClientes !== true,
+    'O WhatsApp do cliente de teste não está seguro.'
   );
 
   exigir(
     Array.isArray(
-      cliente?.whatsappsEncontrados
+      clienteTeste?.whatsappsEncontrados
     ) &&
-      cliente.whatsappsEncontrados.length === 1,
-    'O Airtable deve retornar exatamente um WhatsApp para o cliente.'
+      clienteTeste
+        .whatsappsEncontrados
+        .length === 1,
+    'O cliente de teste deve possuir exatamente um WhatsApp.'
   );
 
-  // Alterações apenas em memória.
-  // O arquivo .env não é modificado.
-  process.env.WHATSAPP_ATIVO =
-    'true';
+  process.env.WHATSAPP_ATIVO = 'true';
 
   process.env.WHATSAPP_SIMULAR =
     ENVIO_REAL
       ? 'false'
       : 'true';
 
-  // false obriga o uso do telefone vindo do Airtable.
   process.env.WHATSAPP_MODO_TESTE =
     'false';
 
   process.env.WHATSAPP_LOG_PAYLOAD =
     'false';
+
+  const {
+    itensDaOS,
+    SEPARADOR_VISUAL_ITENS,
+  } = require('./whatsapp_template.js');
 
   const {
     prepararEnvioWhatsAppDaOS,
@@ -190,12 +270,12 @@ async function executar() {
 
   const telefoneAirtable =
     normalizarTelefone(
-      cliente?.whatsapp
+      clienteTeste?.whatsapp
     );
 
   exigir(
     telefoneAirtable.ok === true,
-    'O WhatsApp vindo do Airtable é inválido.'
+    'O WhatsApp do cliente de teste é inválido.'
   );
 
   exigir(
@@ -205,13 +285,41 @@ async function executar() {
       telefoneAirtable.telefone.endsWith(
         ALVO.sufixoTelefone
       ),
-    'O WhatsApp do Airtable não corresponde ao destino controlado.'
+    'O telefone não corresponde ao destino controlado.'
   );
+
+  const selecao =
+    selecionarItensReais({
+      clientes,
+      itensDaOS,
+      quantidade:
+        ALVO.quantidadeItens,
+    });
+
+  exigir(
+    selecao.linhas.length >=
+      ALVO.quantidadeItens,
+    'Não foram encontrados dois itens reais distintos no Airtable.'
+  );
+
+  const ordemTeste = {
+    osId:
+      `teste_visual_${criarIdExecucao()}`,
+
+    osNome:
+      ALVO.osNomeTeste,
+
+    linhas:
+      selecao.linhas,
+  };
 
   const preparado =
     prepararEnvioWhatsAppDaOS({
-      cliente,
-      ordem,
+      cliente:
+        clienteTeste,
+
+      ordem:
+        ordemTeste,
     });
 
   exigir(
@@ -224,56 +332,55 @@ async function executar() {
   exigir(
     preparado.origemDestino ===
       'airtable',
-    'O telefone não foi obtido do Airtable.'
+    'O telefone não veio do Airtable.'
   );
 
   exigir(
     preparado.telefone ===
       telefoneAirtable.telefone,
-    'O destino preparado difere do WhatsApp armazenado no Airtable.'
+    'O destino preparado está incorreto.'
   );
 
   exigir(
     preparado.clienteId ===
-      ALVO.clienteId &&
-      preparado.osId ===
-        ALVO.osId &&
-      preparado.quantidadeItens ===
-        1,
-    'O payload não pertence exclusivamente ao registro controlado.'
+      ALVO.clienteId,
+    'O envio não pertence ao cliente de teste.'
+  );
+
+  exigir(
+    preparado.quantidadeItens ===
+      ALVO.quantidadeItens,
+    'A mensagem não possui exatamente dois itens.'
+  );
+
+  exigir(
+    preparado.formatoDetalhes ===
+      'blocos',
+    'A mensagem não utilizou o formato em blocos.'
+  );
+
+  exigir(
+    String(
+      preparado.contexto?.detalhes || ''
+    ).includes(
+      SEPARADOR_VISUAL_ITENS
+    ),
+    'O separador visual não foi encontrado.'
   );
 
   const resumo = {
-    ok:
-      true,
-
-    enviado:
-      false,
-
-    simulado:
-      !ENVIO_REAL,
+    ok: true,
+    enviado: false,
+    simulado: !ENVIO_REAL,
 
     fonteDados:
-      'Airtable',
+      'Dois itens reais do Airtable',
 
     fonteTelefone:
-      'WhatsApp do Cliente',
+      'Cliente TESTE 1 - SISTEMA',
 
-    cliente: {
-      id:
-        preparado.clienteId,
-
-      nome:
-        preparado.clienteNome,
-    },
-
-    ordemServico: {
-      id:
-        preparado.osId,
-
-      nome:
-        preparado.osNome,
-    },
+    origensItens:
+      selecao.origens,
 
     destino:
       mascararTelefone(
@@ -282,6 +389,9 @@ async function executar() {
 
     origemDestino:
       preparado.origemDestino,
+
+    ordemExibida:
+      preparado.osNome,
 
     quantidadeItens:
       preparado.quantidadeItens,
@@ -314,8 +424,11 @@ async function executar() {
 
   const resultado =
     await enviarWhatsAppDaOS({
-      cliente,
-      ordem,
+      cliente:
+        clienteTeste,
+
+      ordem:
+        ordemTeste,
     });
 
   exigir(
@@ -348,27 +461,20 @@ async function executar() {
   );
 }
 
-executar().catch(
-  erro => {
-    console.error(
-      JSON.stringify(
-        {
-          ok:
-            false,
+executar().catch(erro => {
+  console.error(
+    JSON.stringify(
+      {
+        ok: false,
+        enviado: false,
+        erro:
+          erro?.message ||
+          String(erro),
+      },
+      null,
+      2
+    )
+  );
 
-          enviado:
-            false,
-
-          erro:
-            erro?.message ||
-            String(erro),
-        },
-        null,
-        2
-      )
-    );
-
-    process.exitCode =
-      1;
-  }
-);
+  process.exitCode = 1;
+});
