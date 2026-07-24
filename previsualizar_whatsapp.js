@@ -176,6 +176,23 @@ function analisarOrdem(
       ordem
     );
 
+  const telefonesEncontrados =
+    Array.isArray(
+      cliente?.whatsappsEncontrados
+    ) &&
+    cliente.whatsappsEncontrados.length > 0
+      ? cliente.whatsappsEncontrados
+      : (
+          cliente?.whatsapp
+            ? [cliente.whatsapp]
+            : []
+        );
+
+  const telefonesMascarados =
+    telefonesEncontrados.map(
+      mascararTelefone
+    );
+
   const base = {
     clienteId:
       texto(cliente?.clienteId),
@@ -187,23 +204,16 @@ function analisarOrdem(
       ),
 
     telefoneMascarado:
-      mascararTelefone(
-        cliente?.whatsapp
-      ),
+      telefonesMascarados.join(' | ') ||
+      '(não informado)',
+
+    telefonesMascarados,
 
     whatsappAmbiguo:
       cliente?.whatsappAmbiguo === true,
 
     quantidadeTelefonesEncontrados:
-      Array.isArray(
-        cliente?.whatsappsEncontrados
-      )
-        ? cliente.whatsappsEncontrados.length
-        : (
-            cliente?.whatsapp
-              ? 1
-              : 0
-          ),
+      telefonesEncontrados.length,
 
     osId:
       texto(ordem?.osId),
@@ -379,6 +389,14 @@ function gerarRelatorio(
       mensagensBloqueadas:
         bloqueadas.length,
 
+      notificacoesPrevistas:
+        validas.reduce(
+          (total, item) =>
+            total +
+            item.quantidadeTelefonesEncontrados,
+          0
+        ),
+
       linhasRecebidas:
         contarLinhas(clientes),
 
@@ -496,6 +514,11 @@ function mostrarCabecalho(
   );
 
   console.log(
+    `Notificações previstas: ` +
+    `${relatorio.totais.notificacoesPrevistas}`
+  );
+
+  console.log(
     `Linhas recebidas do agrupamento: ` +
     `${relatorio.totais.linhasRecebidas}`
   );
@@ -544,9 +567,13 @@ function mostrarMensagem(
     }`
   );
 
+  console.log(
+    `Destinos previstos: ${mensagem.quantidadeTelefonesEncontrados}`
+  );
+
   if (mensagem.whatsappAmbiguo) {
     console.log(
-      'ATENÇÃO: mais de um telefone foi encontrado para o cliente.'
+      'ATENÇÃO: existe ambiguidade de contato entre clientes.'
     );
   }
 
@@ -634,7 +661,7 @@ function mostrarMensagem(
 
   console.log('');
   console.log(
-    'RESULTADO: UMA ÚNICA MENSAGEM PARA ESTA OS'
+    'RESULTADO: MESMA MENSAGEM PARA TODOS OS NÚMEROS DESTA OS'
   );
 
   console.log('');

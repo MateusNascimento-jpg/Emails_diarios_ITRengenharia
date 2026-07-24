@@ -1549,9 +1549,6 @@ function analisarWhatsappDoCliente({
       NUMEROS_BLOQUEADOS.has(numero)
     );
 
-  const maisDeUmNumero =
-    numeros.length > 1;
-
   const compartilhado =
     numerosCompartilhados.length > 0;
 
@@ -1559,20 +1556,16 @@ function analisarWhatsappDoCliente({
     compartilhado &&
     BLOQUEAR_WHATSAPP_COMPARTILHADO;
 
+  // Ter mais de um número no mesmo cliente é permitido.
+  // Ambiguidade continua existindo somente quando um número
+  // também pertence a outro cliente e essa proteção está ativa.
   const whatsappAmbiguo =
-    maisDeUmNumero ||
     compartilhadoBloqueante;
 
   const motivos = [];
 
   if (numeros.length === 0) {
     motivos.push('telefone-ausente');
-  }
-
-  if (maisDeUmNumero) {
-    motivos.push(
-      'mais-de-um-numero-no-cliente'
-    );
   }
 
   if (compartilhadoBloqueante) {
@@ -1594,29 +1587,26 @@ function analisarWhatsappDoCliente({
     );
   }
 
-  const numeroUnico =
-    telefones.length === 1
-      ? telefones[0]
-      : null;
-
   const whatsappSeguroParaEnvio = Boolean(
-    numeroUnico &&
+    numeros.length > 0 &&
     !whatsappAmbiguo &&
-    !NUMEROS_BLOQUEADOS.has(
-      numeroUnico[0]
-    )
+    numerosBloqueados.length === 0
   );
 
   return {
-    // Compatibilidade com enviar_whatsapp.js.
+    // Compatibilidade com integrações antigas que esperam
+    // apenas um campo textual. O envio novo usa a lista abaixo.
     whatsapp:
-      numeroUnico
-        ? numeroUnico[1]
-        : '',
+      originais[0] || '',
 
     whatsappAmbiguo,
 
+    // Todos os números válidos e únicos encontrados para o
+    // cliente. Cada um receberá a mesma notificação da OS.
     whatsappsEncontrados:
+      originais,
+
+    whatsappsParaEnvio:
       originais,
 
     whatsappDuplicadoEntreClientes:
@@ -1690,7 +1680,7 @@ function registrarAvisosCliente(
       `[Airtable/WhatsApp] ` +
       `${clienteFinal.clienteNome}: ` +
       `mais de um telefone válido encontrado. ` +
-      `O envio será bloqueado.`
+      `Todos receberão a mesma notificação da OS.`
     );
   }
 

@@ -6,7 +6,7 @@
 // Responsabilidades:
 //
 // 1. Receber um cliente e uma Ordem de Serviço já agrupada.
-// 2. Escolher o telefone real ou o telefone controlado de teste.
+// 2. Escolher os telefones reais ou o telefone controlado de teste.
 // 3. Normalizar o telefone para o padrão internacional.
 // 4. Validar a segurança do contato consolidado pelo Airtable.
 // 5. Bloquear números proibidos, inclusive o WhatsApp principal.
@@ -19,10 +19,11 @@
 //
 // Regra definitiva:
 //
-// UMA ORDEM DE SERVIÇO = UMA REQUISIÇÃO PARA A META.
+// UMA ORDEM DE SERVIÇO = UMA NOTIFICAÇÃO POR DESTINATÁRIO.
 //
-// Todas as amostras, ensaios e status da OS já estarão
-// consolidados dentro do payload produzido pelo template.
+// Quando o cliente possui dois números válidos, a mesma OS gera
+// uma requisição independente para cada número. Todas as amostras,
+// ensaios e status continuam consolidados no mesmo payload.
 // ============================================================
 
 require('dotenv').config();
@@ -93,23 +94,16 @@ function normalizarVersaoApi(valor) {
 }
 
 const CONFIG = Object.freeze({
-  // false:
-  // o módulo não envia nem simula.
   ativo: booleanoEnv(
     'WHATSAPP_ATIVO',
     false
   ),
 
-  // true:
-  // monta o payload completo, mas não chama a Meta.
   simular: booleanoEnv(
     'WHATSAPP_SIMULAR',
     true
   ),
 
-  // true:
-  // todos os envios são redirecionados para
-  // WHATSAPP_TEST_NUMBER.
   modoTeste: booleanoEnv(
     'WHATSAPP_MODO_TESTE',
     true
@@ -132,8 +126,6 @@ const CONFIG = Object.freeze({
     'WHATSAPP_PHONE_NUMBER_ID'
   ),
 
-  // Armazenado para conferência e diagnóstico.
-  // O envio de mensagens utiliza PHONE_NUMBER_ID.
   businessAccountId: textoEnv(
     'WHATSAPP_BUSINESS_ACCOUNT_ID'
   ),
@@ -155,11 +147,6 @@ const CONFIG = Object.freeze({
     20000
   ),
 
-  // O padrão é uma tentativa para reduzir o risco
-  // de mensagem duplicada quando uma resposta se perde.
-  //
-  // Pode ser aumentado pelo .env depois de existir
-  // um mecanismo persistente de idempotência.
   maxTentativas: numeroInteiroPositivo(
     process.env.WHATSAPP_MAX_TENTATIVAS,
     1
@@ -176,11 +163,6 @@ const CONFIG = Object.freeze({
     false
   ),
 
-  // Lista separada por vírgula, ponto e vírgula,
-  // quebra de linha ou barra vertical.
-  //
-  // Deve conter o número principal da ITR para impedir
-  // qualquer envio acidental a ele durante os testes.
   numerosBloqueados: textoEnv(
     'WHATSAPP_NUMEROS_BLOQUEADOS'
   ),
@@ -330,23 +312,26 @@ function valorEhFalsoExplicito(
 function listaNormalizada(
   valor
 ) {
-  const itens =
+  const itensBrutos =
     Array.isArray(valor)
-      ? valor
+      ? valor.flat(Infinity)
       : (
           valor instanceof Set
             ? [...valor]
-            : dividirLista(valor)
+            : [valor]
         );
 
+  const itens = itensBrutos
+    .flatMap(item =>
+      dividirLista(item)
+    )
+    .map(item =>
+      limparTexto(item)
+    )
+    .filter(Boolean);
+
   return [
-    ...new Set(
-      itens
-        .map(item =>
-          limparTexto(item)
-        )
-        .filter(Boolean)
-    ),
+    ...new Set(itens),
   ];
 }
 
@@ -394,23 +379,11 @@ function normalizarTelefone(
   let digitos =
     somenteDigitos(original);
 
-  // Remove prefixo internacional 00.
-  //
-  // Exemplo:
-  // 005561999999999
-  // vira:
-  // 5561999999999
   if (digitos.startsWith('00')) {
     digitos =
       digitos.slice(2);
   }
 
-  // Números nacionais brasileiros geralmente chegam
-  // com 10 ou 11 dígitos:
-  //
-  // DDD + número
-  //
-  // Nesse caso, o código do país é acrescentado.
   if (
     codigoPaisPadrao &&
     (
@@ -422,11 +395,6 @@ function normalizarTelefone(
       `${codigoPaisPadrao}${digitos}`;
   }
 
-  // Validação compatível com E.164:
-  //
-  // - somente números;
-  // - entre 8 e 15 dígitos;
-  // - não pode começar com zero.
   if (
     !/^[1-9]\d{7,14}$/.test(
       digitos
@@ -446,6 +414,87 @@ function normalizarTelefone(
     original,
     telefone: digitos,
   };
+}
+
+function normalizarListaTelefones(valor) {
+  const itens =
+    listaNormalizada(valor);
+
+  const validos = new Map();
+  const invalidos = [];
+
+  for (const item of itens) {
+    const normalizado =
+      normalizarTelefone(item);
+
+    if (!normalizado.ok) {
+      invalidos.push({
+        original:
+          normalizado.original,
+
+        motivo:
+          normalizado.motivo,
+      });
+
+      continue;
+    }
+
+    if (
+      !validos.has(
+        normalizado.telefone
+      )
+    ) {
+      validos.set(
+        normalizado.telefone,
+        normalizado.original
+      );
+    }
+  }
+
+  return {
+    validos: [
+      ...validos.entries(),
+    ].map(
+      ([telefone, original]) => ({
+        telefone,
+        original,
+      })
+    ),
+
+    invalidos,
+  };
+}
+
+// ============================================================
+// NÚMEROS BLOQUEADOS
+// ============================================================
+
+function obterNumerosBloqueados() {
+  const bloqueados = new Set();
+
+  for (
+    const item of dividirLista(
+      CONFIG.numerosBloqueados
+    )
+  ) {
+    const normalizado =
+      normalizarTelefone(item);
+
+    if (normalizado.ok) {
+      bloqueados.add(
+        normalizado.telefone
+      );
+    }
+  }
+
+  return bloqueados;
+}
+
+function telefoneEstaBloqueado(
+  telefone
+) {
+  return obterNumerosBloqueados()
+    .has(telefone);
 }
 
 // ============================================================
@@ -484,15 +533,35 @@ function validarSegurancaWhatsappCliente(
       )
     );
 
-  const whatsappsEncontrados =
-    listaNormalizada(
-      cliente
-        ?.whatsappsEncontrados
+  const fontesTelefones =
+    Array.isArray(
+      cliente?.whatsappsParaEnvio
+    ) &&
+    cliente.whatsappsParaEnvio.length > 0
+      ? cliente.whatsappsParaEnvio
+      : (
+          Array.isArray(
+            cliente?.whatsappsEncontrados
+          ) &&
+          cliente.whatsappsEncontrados.length > 0
+            ? cliente.whatsappsEncontrados
+            : cliente?.whatsapp
+        );
+
+  const telefonesAnalisados =
+    normalizarListaTelefones(
+      fontesTelefones
     );
 
+  const telefonesCliente =
+    telefonesAnalisados.validos;
+
   const numerosMascarados =
-    whatsappsEncontrados.map(
-      mascararTelefone
+    telefonesCliente.map(
+      item =>
+        mascararTelefone(
+          item.telefone
+        )
     );
 
   const respostaBase = {
@@ -505,9 +574,16 @@ function validarSegurancaWhatsappCliente(
     motivosOriginais,
 
     quantidadeNumerosEncontrados:
-      whatsappsEncontrados.length,
+      telefonesCliente.length,
+
+    quantidadeNumerosInvalidos:
+      telefonesAnalisados
+        .invalidos.length,
 
     numerosMascarados,
+
+    telefoneMascarado:
+      numerosMascarados[0] || '',
   };
 
   const marcadoComoBloqueado =
@@ -530,7 +606,7 @@ function validarSegurancaWhatsappCliente(
         'numero-bloqueado-no-airtable',
 
       mensagem:
-        'O contato do cliente foi marcado como bloqueado ' +
+        'Ao menos um contato do cliente foi marcado como bloqueado ' +
         'durante a consolidação do Airtable.',
 
       ...respostaBase,
@@ -557,7 +633,7 @@ function validarSegurancaWhatsappCliente(
         'numero-compartilhado-entre-clientes',
 
       mensagem:
-        'O mesmo número foi associado a mais de um cliente. ' +
+        'Ao menos um número foi associado a mais de um cliente. ' +
         'O envio foi bloqueado para evitar destinatário incorreto.',
 
       clientesComMesmoWhatsapp:
@@ -570,32 +646,23 @@ function validarSegurancaWhatsappCliente(
     };
   }
 
-  const contatoAmbiguo =
+  const contatoAmbiguoNaoRelacionadoAMultiplos =
     valorEhVerdadeiro(
-      cliente
-        ?.whatsappAmbiguo
-    ) ||
-    whatsappsEncontrados.length > 1 ||
-    motivosNormalizados.has(
-      'cliente-com-mais-de-um-whatsapp'
-    ) ||
-    motivosNormalizados.has(
-      'mais-de-um-whatsapp'
-    ) ||
-    motivosNormalizados.has(
-      'whatsapp-ambiguo'
-    );
+      cliente?.whatsappAmbiguo
+    ) &&
+    telefonesCliente.length <= 1;
 
-  if (contatoAmbiguo) {
+  if (
+    contatoAmbiguoNaoRelacionadoAMultiplos
+  ) {
     return {
       ok: false,
 
       motivo:
-        'cliente-com-mais-de-um-whatsapp',
+        'whatsapp-ambiguo',
 
       mensagem:
-        'O cliente possui contato ambíguo ou mais de um ' +
-        'número consolidado no Airtable.',
+        'O contato do cliente foi marcado como ambíguo.',
 
       ...respostaBase,
     };
@@ -639,60 +706,35 @@ function validarSegurancaWhatsappCliente(
     };
   }
 
-  const telefoneCliente =
-    limparTexto(
-      cliente?.whatsapp
+  const numerosBloqueados =
+    telefonesCliente.filter(
+      item =>
+        telefoneEstaBloqueado(
+          item.telefone
+        )
     );
 
-  if (telefoneCliente) {
-    const normalizado =
-      normalizarTelefone(
-        telefoneCliente
-      );
+  if (numerosBloqueados.length > 0) {
+    return {
+      ok: false,
 
-    if (!normalizado.ok) {
-      return {
-        ok: false,
+      motivo:
+        'numero-bloqueado',
 
-        motivo:
-          'whatsapp-cliente-invalido',
+      mensagem:
+        'Ao menos um número do cliente está presente em ' +
+        'WHATSAPP_NUMEROS_BLOQUEADOS.',
 
-        mensagem:
-          'O telefone consolidado do cliente não pôde ' +
-          'ser normalizado para o padrão internacional.',
+      numerosBloqueadosMascarados:
+        numerosBloqueados.map(
+          item =>
+            mascararTelefone(
+              item.telefone
+            )
+        ),
 
-        telefoneMascarado:
-          mascararTelefone(
-            telefoneCliente
-          ),
-
-        ...respostaBase,
-      };
-    }
-
-    if (
-      telefoneEstaBloqueado(
-        normalizado.telefone
-      )
-    ) {
-      return {
-        ok: false,
-
-        motivo:
-          'numero-bloqueado',
-
-        mensagem:
-          'O telefone consolidado do cliente está presente ' +
-          'em WHATSAPP_NUMEROS_BLOQUEADOS.',
-
-        telefoneMascarado:
-          mascararTelefone(
-            normalizado.telefone
-          ),
-
-        ...respostaBase,
-      };
-    }
+      ...respostaBase,
+    };
   }
 
   const marcadoComoInseguro =
@@ -716,14 +758,9 @@ function validarSegurancaWhatsappCliente(
     };
   }
 
-  // No modo de teste, o destino é WHATSAPP_TEST_NUMBER.
-  // Mesmo assim, todos os bloqueios explícitos acima continuam
-  // sendo respeitados. A única concessão é permitir que um
-  // objeto legado, sem whatsapp e sem flag explícita de risco,
-  // utilize o número controlado de teste.
   if (
     !modoTeste &&
-    !telefoneCliente
+    telefonesCliente.length === 0
   ) {
     return {
       ok: false,
@@ -732,7 +769,7 @@ function validarSegurancaWhatsappCliente(
         'cliente-sem-whatsapp',
 
       mensagem:
-        'O Airtable não retornou um número único e seguro ' +
+        'O Airtable não retornou nenhum número válido e seguro ' +
         'para este cliente.',
 
       ...respostaBase,
@@ -748,49 +785,21 @@ function validarSegurancaWhatsappCliente(
     mensagem:
       '',
 
-    telefoneCliente,
+    telefoneCliente:
+      telefonesCliente[0]
+        ?.original || '',
+
+    telefonesCliente,
 
     ...respostaBase,
   };
 }
 
 // ============================================================
-// NÚMEROS BLOQUEADOS
+// ESCOLHA DOS DESTINATÁRIOS
 // ============================================================
 
-function obterNumerosBloqueados() {
-  const bloqueados = new Set();
-
-  for (
-    const item of dividirLista(
-      CONFIG.numerosBloqueados
-    )
-  ) {
-    const normalizado =
-      normalizarTelefone(item);
-
-    if (normalizado.ok) {
-      bloqueados.add(
-        normalizado.telefone
-      );
-    }
-  }
-
-  return bloqueados;
-}
-
-function telefoneEstaBloqueado(
-  telefone
-) {
-  return obterNumerosBloqueados()
-    .has(telefone);
-}
-
-// ============================================================
-// ESCOLHA DO DESTINO
-// ============================================================
-
-function escolherTelefoneDestino(
+function escolherTelefonesDestino(
   cliente
 ) {
   const segurancaCliente =
@@ -842,27 +851,38 @@ function escolherTelefoneDestino(
     return {
       ok: true,
 
-      telefone:
-        normalizado.telefone,
+      destinos: [
+        {
+          telefone:
+            normalizado.telefone,
 
-      origem:
-        'teste',
+          origem:
+            'teste',
 
-      telefoneOriginal:
-        CONFIG.numeroTeste,
+          telefoneOriginal:
+            CONFIG.numeroTeste,
+        },
+      ],
 
       segurancaCliente,
     };
   }
 
-  const telefoneCliente =
-    limparTexto(
-      cliente?.whatsapp
-    );
+  const destinos =
+    segurancaCliente
+      .telefonesCliente
+      .map(item => ({
+        telefone:
+          item.telefone,
 
-  // Defesa redundante: a validação anterior já bloqueia
-  // cliente sem número fora do modo de teste.
-  if (!telefoneCliente) {
+        origem:
+          'airtable',
+
+        telefoneOriginal:
+          item.original,
+      }));
+
+  if (destinos.length === 0) {
     return {
       ok: false,
 
@@ -870,50 +890,35 @@ function escolherTelefoneDestino(
         'cliente-sem-whatsapp',
 
       mensagem:
-        'O Airtable não retornou um número ' +
-        'único e seguro para este cliente.',
-    };
-  }
-
-  const normalizado =
-    normalizarTelefone(
-      telefoneCliente
-    );
-
-  // Defesa redundante: a validação anterior já bloqueia
-  // telefone inválido, mas esta verificação protege o uso
-  // direto desta função em integrações futuras.
-  if (!normalizado.ok) {
-    return {
-      ok: false,
-
-      motivo:
-        'whatsapp-cliente-invalido',
-
-      mensagem:
-        'O telefone do cliente vindo do ' +
-        'Airtable não pôde ser normalizado.',
-
-      telefoneMascarado:
-        mascararTelefone(
-          telefoneCliente
-        ),
+        'O Airtable não retornou nenhum número ' +
+        'válido e seguro para este cliente.',
     };
   }
 
   return {
     ok: true,
-
-    telefone:
-      normalizado.telefone,
-
-    origem:
-      'airtable',
-
-    telefoneOriginal:
-      telefoneCliente,
-
+    destinos,
     segurancaCliente,
+  };
+}
+
+function escolherTelefoneDestino(
+  cliente
+) {
+  const resultado =
+    escolherTelefonesDestino(cliente);
+
+  if (!resultado.ok) {
+    return resultado;
+  }
+
+  return {
+    ok: true,
+
+    ...resultado.destinos[0],
+
+    segurancaCliente:
+      resultado.segurancaCliente,
   };
 }
 
@@ -1428,13 +1433,6 @@ async function requisitarMeta(
             : 'rede',
       };
 
-      // Por segurança, uma falha de rede ou timeout
-      // não é repetida automaticamente.
-      //
-      // A primeira requisição pode ter sido aceita pela Meta,
-      // mesmo que a resposta não tenha chegado ao servidor.
-      //
-      // Isso reduz o risco de mensagens duplicadas.
       return ultimoResultado;
     } finally {
       clearTimeout(
@@ -1491,14 +1489,14 @@ function prepararEnvioWhatsAppDaOS({
     };
   }
 
-  const destino =
-    escolherTelefoneDestino(
+  const destinosResultado =
+    escolherTelefonesDestino(
       cliente
     );
 
-  if (!destino.ok) {
+  if (!destinosResultado.ok) {
     return {
-      ...destino,
+      ...destinosResultado,
 
       clienteId:
         cliente?.clienteId || '',
@@ -1516,20 +1514,83 @@ function prepararEnvioWhatsAppDaOS({
     };
   }
 
-  if (
-    telefoneEstaBloqueado(
-      destino.telefone
-    )
+  const envios = [];
+  let referenciaResultado = null;
+
+  for (
+    const destino
+    of destinosResultado.destinos
   ) {
-    return {
-      ok: false,
+    if (
+      telefoneEstaBloqueado(
+        destino.telefone
+      )
+    ) {
+      return {
+        ok: false,
 
-      motivo:
-        'numero-bloqueado',
+        motivo:
+          'numero-bloqueado',
 
-      mensagem:
-        'O destino está presente em ' +
-        'WHATSAPP_NUMEROS_BLOQUEADOS.',
+        mensagem:
+          'Um dos destinos está presente em ' +
+          'WHATSAPP_NUMEROS_BLOQUEADOS.',
+
+        telefoneMascarado:
+          mascararTelefone(
+            destino.telefone
+          ),
+
+        origemDestino:
+          destino.origem,
+
+        clienteId:
+          cliente?.clienteId || '',
+
+        clienteNome:
+          cliente?.clienteNome || '',
+
+        osId:
+          ordem?.osId || '',
+
+        osNome:
+          ordem?.osNome ||
+          ordem?.osId ||
+          '',
+      };
+    }
+
+    const resultadoPayload =
+      montarPayloadTemplateWhatsApp({
+        cliente,
+        ordem,
+
+        telefone:
+          destino.telefone,
+      });
+
+    if (!resultadoPayload.ok) {
+      return {
+        ...resultadoPayload,
+
+        telefoneMascarado:
+          mascararTelefone(
+            destino.telefone
+          ),
+
+        origemDestino:
+          destino.origem,
+      };
+    }
+
+    if (!referenciaResultado) {
+      referenciaResultado =
+        resultadoPayload;
+    }
+
+    envios.push({
+      payload:
+        resultadoPayload.payload,
 
       telefone:
         destino.telefone,
@@ -1542,97 +1603,75 @@ function prepararEnvioWhatsAppDaOS({
       origemDestino:
         destino.origem,
 
-      clienteId:
-        cliente?.clienteId || '',
-
-      clienteNome:
-        cliente?.clienteNome || '',
-
-      osId:
-        ordem?.osId || '',
-
-      osNome:
-        ordem?.osNome ||
-        ordem?.osId ||
-        '',
-    };
-  }
-
-  const resultadoPayload =
-    montarPayloadTemplateWhatsApp({
-      cliente,
-      ordem,
-
-      telefone:
-        destino.telefone,
+      telefoneOriginal:
+        destino.telefoneOriginal,
     });
-
-  if (!resultadoPayload.ok) {
-    return {
-      ...resultadoPayload,
-
-      telefone:
-        destino.telefone,
-
-      telefoneMascarado:
-        mascararTelefone(
-          destino.telefone
-        ),
-
-      origemDestino:
-        destino.origem,
-    };
   }
+
+  const primeiroEnvio =
+    envios[0];
+
+  const referencia =
+    referenciaResultado;
 
   return {
     ok: true,
 
-    payload:
-      resultadoPayload.payload,
+    envios,
 
-    contexto:
-      resultadoPayload.contexto,
+    quantidadeDestinos:
+      envios.length,
 
-    itens:
-      resultadoPayload.itens,
-
-    quantidadeItens:
-      resultadoPayload.quantidadeItens,
-
-    formatoDetalhes:
-      resultadoPayload.formatoDetalhes,
-
-    tamanhoDetalhes:
-      resultadoPayload.tamanhoDetalhes,
-
-    tamanhoCorpoEstimado:
-      resultadoPayload.tamanhoCorpoEstimado,
-
-    limiteCorpo:
-      resultadoPayload.limiteCorpo,
-
-    telefone:
-      destino.telefone,
-
-    telefoneMascarado:
-      mascararTelefone(
-        destino.telefone
+    telefonesMascarados:
+      envios.map(
+        item =>
+          item.telefoneMascarado
       ),
 
+    payload:
+      primeiroEnvio.payload,
+
+    telefone:
+      primeiroEnvio.telefone,
+
+    telefoneMascarado:
+      primeiroEnvio.telefoneMascarado,
+
     origemDestino:
-      destino.origem,
+      primeiroEnvio.origemDestino,
+
+    contexto:
+      referencia.contexto,
+
+    itens:
+      referencia.itens,
+
+    quantidadeItens:
+      referencia.quantidadeItens,
+
+    formatoDetalhes:
+      referencia.formatoDetalhes,
+
+    tamanhoDetalhes:
+      referencia.tamanhoDetalhes,
+
+    tamanhoCorpoEstimado:
+      referencia.tamanhoCorpoEstimado,
+
+    limiteCorpo:
+      referencia.limiteCorpo,
 
     clienteId:
-      resultadoPayload.clienteId,
+      referencia.clienteId,
 
     clienteNome:
-      resultadoPayload.clienteNome,
+      referencia.clienteNome,
 
     osId:
-      resultadoPayload.osId,
+      referencia.osId,
 
     osNome:
-      resultadoPayload.osNome,
+      referencia.osNome,
   };
 }
 
@@ -1654,8 +1693,6 @@ async function enviarWhatsAppDaOS({
     cliente?.clienteId ||
     '(cliente não informado)';
 
-  // O canal permanece totalmente inativo até
-  // WHATSAPP_ATIVO=true.
   if (!CONFIG.ativo) {
     console.log(
       `[WhatsApp] Desativado: ` +
@@ -1666,11 +1703,14 @@ async function enviarWhatsAppDaOS({
     return {
       ok: true,
 
-      enviado: false,
+      enviado:
+        false,
 
-      simulado: false,
+      simulado:
+        false,
 
-      ignorado: true,
+      ignorado:
+        true,
 
       motivo:
         'whatsapp-desativado',
@@ -1719,30 +1759,33 @@ async function enviarWhatsAppDaOS({
   }
 
   if (CONFIG.logPayload) {
-    console.log(
-      '[WhatsApp] Payload preparado:',
+    preparado.envios.forEach(
+      (envio, indice) => {
+        console.log(
+          `[WhatsApp] Payload preparado ` +
+          `${indice + 1}/` +
+          `${preparado.quantidadeDestinos}:`,
 
-      JSON.stringify(
-        payloadSeguroParaLog(
-          preparado.payload
-        ),
-        null,
-        2
-      )
+          JSON.stringify(
+            payloadSeguroParaLog(
+              envio.payload
+            ),
+            null,
+            2
+          )
+        );
+      }
     );
   }
 
-  // Simulação:
-  //
-  // O payload é gerado integralmente, mas não existe
-  // comunicação com a Meta.
   if (CONFIG.simular) {
     console.log(
       `[WhatsApp/SIMULAÇÃO] ` +
       `${preparado.clienteNome} | ` +
       `${preparado.osNome} | ` +
       `${preparado.quantidadeItens} item(ns) | ` +
-      `destino ${preparado.telefoneMascarado}`
+      `${preparado.quantidadeDestinos} destino(s): ` +
+      `${preparado.telefonesMascarados.join(' | ')}`
     );
 
     return {
@@ -1761,10 +1804,6 @@ async function enviarWhatsAppDaOS({
         'simulacao',
 
       ...preparado,
-
-      // Mantido para conferência local.
-      payload:
-        preparado.payload,
     };
   }
 
@@ -1801,54 +1840,136 @@ async function enviarWhatsAppDaOS({
       osNome:
         preparado.osNome,
 
-      telefoneMascarado:
-        preparado.telefoneMascarado,
+      quantidadeDestinos:
+        preparado.quantidadeDestinos,
+
+      telefonesMascarados:
+        preparado.telefonesMascarados,
     };
   }
 
-  console.log(
-    `[WhatsApp] Enviando: ` +
-    `${preparado.clienteNome} | ` +
-    `${preparado.osNome} | ` +
-    `${preparado.quantidadeItens} item(ns) | ` +
-    `destino ${preparado.telefoneMascarado} | ` +
-    `Phone Number ID ` +
-    `${mascararId(
-      CONFIG.phoneNumberId
-    )}`
-  );
+  const resultados = [];
 
-  const respostaMeta =
-    await requisitarMeta(
-      preparado.payload
-    );
+  for (
+    let indice = 0;
+    indice < preparado.envios.length;
+    indice += 1
+  ) {
+    const envio =
+      preparado.envios[indice];
 
-  if (!respostaMeta.ok) {
-    console.error(
-      `[WhatsApp] Falha: ` +
+    console.log(
+      `[WhatsApp] Enviando ` +
+      `${indice + 1}/` +
+      `${preparado.quantidadeDestinos}: ` +
       `${preparado.clienteNome} | ` +
       `${preparado.osNome} | ` +
-      `${respostaMeta.mensagem}`
+      `${preparado.quantidadeItens} item(ns) | ` +
+      `destino ${envio.telefoneMascarado} | ` +
+      `Phone Number ID ` +
+      `${mascararId(
+        CONFIG.phoneNumberId
+      )}`
     );
 
-    return {
+    const respostaMeta =
+      await requisitarMeta(
+        envio.payload
+      );
+
+    if (!respostaMeta.ok) {
+      console.error(
+        `[WhatsApp] Falha ` +
+        `${indice + 1}/` +
+        `${preparado.quantidadeDestinos}: ` +
+        `${preparado.clienteNome} | ` +
+        `${preparado.osNome} | ` +
+        `${envio.telefoneMascarado} | ` +
+        `${respostaMeta.mensagem}`
+      );
+
+      resultados.push({
+        ok:
+          false,
+
+        enviado:
+          false,
+
+        telefoneMascarado:
+          envio.telefoneMascarado,
+
+        origemDestino:
+          envio.origemDestino,
+
+        motivo:
+          'erro-meta',
+
+        mensagem:
+          respostaMeta.mensagem,
+
+        statusHttp:
+          respostaMeta.statusHttp,
+
+        requestId:
+          respostaMeta.requestId,
+
+        tentativa:
+          respostaMeta.tentativa,
+
+        codigoMeta:
+          respostaMeta.dados
+            ?.error?.code ??
+          null,
+
+        subcodigoMeta:
+          respostaMeta.dados
+            ?.error
+            ?.error_subcode ??
+          null,
+
+        detalhesMeta:
+          respostaMeta.dados
+            ?.error
+            ?.error_data
+            ?.details ||
+          '',
+
+        tipoErro:
+          respostaMeta.tipoErro ||
+          '',
+      });
+
+      continue;
+    }
+
+    console.log(
+      `[WhatsApp] Enviado com sucesso ` +
+      `${indice + 1}/` +
+      `${preparado.quantidadeDestinos}: ` +
+      `${preparado.clienteNome} | ` +
+      `${preparado.osNome} | ` +
+      `${envio.telefoneMascarado} | ` +
+      `Message ID ` +
+      `${mascararId(
+        respostaMeta.messageId
+      )}`
+    );
+
+    resultados.push({
       ok:
-        false,
+        true,
 
       enviado:
-        false,
+        true,
 
-      simulado:
-        false,
+      telefoneMascarado:
+        envio.telefoneMascarado,
 
-      ignorado:
-        false,
+      origemDestino:
+        envio.origemDestino,
 
-      motivo:
-        'erro-meta',
-
-      mensagem:
-        respostaMeta.mensagem,
+      messageId:
+        respostaMeta.messageId,
 
       statusHttp:
         respostaMeta.statusHttp,
@@ -1858,100 +1979,22 @@ async function enviarWhatsAppDaOS({
 
       tentativa:
         respostaMeta.tentativa,
-
-      erroMeta:
-        respostaMeta.dados?.error ||
-        respostaMeta.dados ||
-        {},
-
-      codigoMeta:
-        respostaMeta.dados?.error?.code ??
-        null,
-
-      subcodigoMeta:
-        respostaMeta.dados?.error
-          ?.error_subcode ??
-        null,
-
-      detalhesMeta:
-        respostaMeta.dados?.error
-          ?.error_data?.details ||
-        '',
-
-      tipoErro:
-        respostaMeta.tipoErro ||
-        '',
-
-      clienteId:
-        preparado.clienteId,
-
-      clienteNome:
-        preparado.clienteNome,
-
-      osId:
-        preparado.osId,
-
-      osNome:
-        preparado.osNome,
-
-      telefoneMascarado:
-        preparado.telefoneMascarado,
-
-      quantidadeItens:
-        preparado.quantidadeItens,
-
-      formatoDetalhes:
-        preparado.formatoDetalhes,
-
-      tamanhoDetalhes:
-        preparado.tamanhoDetalhes,
-
-      tamanhoCorpoEstimado:
-        preparado.tamanhoCorpoEstimado,
-
-      limiteCorpo:
-        preparado.limiteCorpo,
-    };
+    });
   }
 
-  console.log(
-    `[WhatsApp] Enviado com sucesso: ` +
-    `${preparado.clienteNome} | ` +
-    `${preparado.osNome} | ` +
-    `Message ID ` +
-    `${mascararId(
-      respostaMeta.messageId
-    )}`
-  );
+  const enviados =
+    resultados.filter(
+      item =>
+        item.enviado === true
+    );
 
-  return {
-    ok:
-      true,
+  const falhas =
+    resultados.filter(
+      item =>
+        item.ok === false
+    );
 
-    enviado:
-      true,
-
-    simulado:
-      false,
-
-    ignorado:
-      false,
-
-    motivo:
-      '',
-
-    messageId:
-      respostaMeta.messageId,
-
-    statusHttp:
-      respostaMeta.statusHttp,
-
-    requestId:
-      respostaMeta.requestId,
-
-    tentativa:
-      respostaMeta.tentativa,
-
+  const baseResultado = {
     clienteId:
       preparado.clienteId,
 
@@ -1963,12 +2006,6 @@ async function enviarWhatsAppDaOS({
 
     osNome:
       preparado.osNome,
-
-    telefoneMascarado:
-      preparado.telefoneMascarado,
-
-    origemDestino:
-      preparado.origemDestino,
 
     quantidadeItens:
       preparado.quantidadeItens,
@@ -1984,6 +2021,128 @@ async function enviarWhatsAppDaOS({
 
     limiteCorpo:
       preparado.limiteCorpo,
+
+    quantidadeDestinos:
+      preparado.quantidadeDestinos,
+
+    quantidadeEnviados:
+      enviados.length,
+
+    quantidadeFalhas:
+      falhas.length,
+
+    telefonesMascarados:
+      preparado.telefonesMascarados,
+
+    messageIds:
+      enviados.map(
+        item =>
+          item.messageId
+      ),
+
+    resultados,
+  };
+
+  if (falhas.length > 0) {
+    const primeiraFalha =
+      falhas[0];
+
+    return {
+      ok:
+        false,
+
+      enviado:
+        false,
+
+      simulado:
+        false,
+
+      ignorado:
+        false,
+
+      parcial:
+        enviados.length > 0,
+
+      motivo:
+        enviados.length > 0
+          ? 'erro-meta-parcial'
+          : 'erro-meta',
+
+      mensagem:
+        enviados.length > 0
+          ? (
+              `${enviados.length} de ` +
+              `${preparado.quantidadeDestinos} ` +
+              `destino(s) receberam a mensagem; ` +
+              `${falhas.length} falharam.`
+            )
+          : primeiraFalha.mensagem,
+
+      statusHttp:
+        primeiraFalha.statusHttp,
+
+      requestId:
+        primeiraFalha.requestId,
+
+      tentativa:
+        primeiraFalha.tentativa,
+
+      codigoMeta:
+        primeiraFalha.codigoMeta,
+
+      subcodigoMeta:
+        primeiraFalha.subcodigoMeta,
+
+      detalhesMeta:
+        primeiraFalha.detalhesMeta,
+
+      tipoErro:
+        primeiraFalha.tipoErro,
+
+      ...baseResultado,
+    };
+  }
+
+  return {
+    ok:
+      true,
+
+    enviado:
+      true,
+
+    simulado:
+      false,
+
+    ignorado:
+      false,
+
+    parcial:
+      false,
+
+    motivo:
+      '',
+
+    messageId:
+      enviados[0]?.messageId || '',
+
+    statusHttp:
+      enviados[0]?.statusHttp || 200,
+
+    requestId:
+      enviados[0]?.requestId || '',
+
+    tentativa:
+      enviados[0]?.tentativa || 1,
+
+    telefoneMascarado:
+      resultados[0]
+        ?.telefoneMascarado || '',
+
+    origemDestino:
+      resultados[0]
+        ?.origemDestino || '',
+
+    ...baseResultado,
   };
 }
 
@@ -1996,10 +2155,14 @@ module.exports = {
   prepararEnvioWhatsAppDaOS,
 
   normalizarTelefone,
-  validarSegurancaWhatsappCliente,
-  escolherTelefoneDestino,
-  telefoneEstaBloqueado,
+  normalizarListaTelefones,
 
+  validarSegurancaWhatsappCliente,
+
+  escolherTelefonesDestino,
+  escolherTelefoneDestino,
+
+  telefoneEstaBloqueado,
   validarConfiguracaoMeta,
 
   CONFIG,

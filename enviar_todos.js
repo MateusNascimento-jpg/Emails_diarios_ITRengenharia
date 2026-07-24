@@ -10,16 +10,19 @@
 // 3. Recebe os dados agrupados em:
 //      Cliente → Ordem de Serviço → Linhas.
 // 4. Gera um e-mail para cada OS.
-// 5. Após o e-mail, gera uma mensagem de WhatsApp para a OS.
+// 5. Após o e-mail, gera a notificação de WhatsApp da OS.
 // 6. Todas as amostras, ensaios e status da mesma OS são
-//    incluídos em uma única mensagem de WhatsApp.
-// 7. Uma falha em um canal não encerra toda a execução.
-// 8. Duas execuções simultâneas no mesmo processo são impedidas.
+//    incluídos no mesmo conteúdo.
+// 7. Se o cliente possuir mais de um WhatsApp válido, a mesma
+//    notificação será enviada para cada número.
+// 8. Uma falha em um canal não encerra toda a execução.
+// 9. Duas execuções simultâneas no mesmo processo são impedidas.
 //
-// Regra definitiva:
+// Regras:
 //
 // UMA ORDEM DE SERVIÇO = UM E-MAIL
-// UMA ORDEM DE SERVIÇO = UMA MENSAGEM DE WHATSAPP
+// UMA ORDEM DE SERVIÇO = UMA NOTIFICAÇÃO DE WHATSAPP
+// UMA NOTIFICAÇÃO = UMA MENSAGEM PARA CADA DESTINATÁRIO
 //
 // Os dados utilizados nos dois canais vêm do Airtable.
 // ============================================================
@@ -96,35 +99,26 @@ function numeroInteiroNaoNegativo(
 }
 
 const CONFIG = Object.freeze({
-  // Permite desativar o canal de e-mail sem apagar código.
   emailAtivo: booleanoEnv(
     'EMAIL_ATIVO',
     true
   ),
 
-  // Quando true, o WhatsApp somente será processado se o
-  // e-mail da respectiva OS tiver sido enviado com sucesso.
-  //
-  // Isso preserva a veracidade da frase:
-  // "A atualização também foi enviada por e-mail."
   whatsappExigirEmailEnviado: booleanoEnv(
     'WHATSAPP_EXIGIR_EMAIL_ENVIADO',
     true
   ),
 
-  // Intervalo depois de uma tentativa real de e-mail.
   emailPausaMs: numeroInteiroNaoNegativo(
     process.env.EMAIL_PAUSA_MS,
     1500
   ),
 
-  // Intervalo depois de um envio ou simulação do WhatsApp.
   whatsappPausaMs: numeroInteiroNaoNegativo(
     process.env.WHATSAPP_PAUSA_MS,
     1200
   ),
 
-  // Intervalo adicional entre duas Ordens de Serviço.
   pausaEntreOsMs: numeroInteiroNaoNegativo(
     process.env.PAUSA_ENTRE_OS_MS,
     0
@@ -133,18 +127,6 @@ const CONFIG = Object.freeze({
 
 // ============================================================
 // TRAVA DE EXECUÇÃO
-// ============================================================
-//
-// Impede que o cron e o disparo manual processem os mesmos
-// dados simultaneamente dentro da mesma instância Node.js.
-//
-// Exemplo protegido:
-//
-// 08:00:00 → cron inicia
-// 08:00:10 → alguém aciona /disparar-agora
-//
-// A segunda execução será recusada enquanto a primeira estiver
-// ativa.
 // ============================================================
 
 let execucaoEmAndamento = null;
@@ -233,6 +215,10 @@ function emailConfirmado(resultado) {
 }
 
 function falhaWhatsappEhIncerta(resultado) {
+  if (resultado?.parcial === true) {
+    return true;
+  }
+
   const statusHttp = Number(
     resultado?.statusHttp || 0
   );
@@ -331,16 +317,26 @@ function resultadoBloqueadoPorIdempotencia({
   return {
     ok:
       controle?.ok !== false,
-    enviado: false,
-    simulado: false,
-    ignorado: true,
+
+    enviado:
+      false,
+
+    simulado:
+      false,
+
+    ignorado:
+      true,
+
     motivo:
       controle?.motivo ||
       'bloqueado-por-idempotencia',
+
     mensagem:
       controle?.mensagem || '',
+
     confirmadoAnteriormente:
       controle?.confirmadoAnteriormente === true,
+
     idempotencia:
       true,
   };
@@ -375,6 +371,8 @@ function criarResumoInicial() {
 
     whatsapp: {
       enviados: 0,
+      destinatariosEnviados: 0,
+      destinatariosComFalha: 0,
       simulados: 0,
       falhas: 0,
       ignorados: 0,
@@ -394,6 +392,36 @@ function registrarResultadoWhatsApp(
     resumo.whatsapp.falhas += 1;
     return;
   }
+
+  const quantidadeEnviados =
+    Number.isInteger(
+      resultado.quantidadeEnviados
+    )
+      ? resultado.quantidadeEnviados
+      : (
+          resultado.enviado === true
+            ? 1
+            : 0
+        );
+
+  const quantidadeFalhas =
+    Number.isInteger(
+      resultado.quantidadeFalhas
+    )
+      ? resultado.quantidadeFalhas
+      : (
+          resultado.ok === false
+            ? 1
+            : 0
+        );
+
+  resumo.whatsapp
+    .destinatariosEnviados +=
+      quantidadeEnviados;
+
+  resumo.whatsapp
+    .destinatariosComFalha +=
+      quantidadeFalhas;
 
   if (
     resultado.enviado === true
@@ -475,8 +503,6 @@ async function processarEmailDaOS({
       cliente
     );
 
-  // Em modo de teste, o endereço real pode estar ausente,
-  // pois o enviar_email.js redirecionará para EMAIL_MODO_TESTE.
   if (
     !possuiDestino &&
     !MODO_TESTE
@@ -526,16 +552,22 @@ async function processarEmailDaOS({
     if (idempotenciaAplicavelAoEmail()) {
       const hash = criarHashEnvio({
         canal: 'email',
+
         clienteId:
           cliente?.clienteId || '',
+
         osId:
           ordem?.osId || '',
+
         destino,
+
         conteudo: {
           assunto:
             conteudo.assunto,
+
           texto:
             conteudo.texto,
+
           html:
             conteudo.html,
         },
@@ -543,9 +575,12 @@ async function processarEmailDaOS({
 
       const controle =
         await reservarEnvio({
-          canal: 'email',
+          canal:
+            'email',
+
           osId:
             ordem?.osId || '',
+
           hash,
         });
 
@@ -584,8 +619,12 @@ async function processarEmailDaOS({
     if (!resultado?.ok) {
       await finalizarIdempotencia({
         reserva,
-        estado: 'incerto',
-        canal: 'email',
+        estado:
+          'incerto',
+
+        canal:
+          'email',
+
         clienteNome,
         osNome,
         resumo,
@@ -600,9 +639,15 @@ async function processarEmailDaOS({
       );
 
       return {
-        ok: false,
-        enviado: false,
-        ignorado: false,
+        ok:
+          false,
+
+        enviado:
+          false,
+
+        ignorado:
+          false,
+
         motivo:
           resultado?.motivo ||
           'falha-email',
@@ -612,8 +657,13 @@ async function processarEmailDaOS({
     const idempotencia =
       await finalizarIdempotencia({
         reserva,
-        estado: 'enviado',
-        canal: 'email',
+
+        estado:
+          'enviado',
+
+        canal:
+          'email',
+
         clienteNome,
         osNome,
         resumo,
@@ -635,22 +685,37 @@ async function processarEmailDaOS({
     );
 
     return {
-      ok: true,
-      enviado: true,
-      ignorado: false,
-      motivo: '',
+      ok:
+        true,
+
+      enviado:
+        true,
+
+      ignorado:
+        false,
+
+      motivo:
+        '',
+
       id:
         resultado.id || '',
+
       destino:
         resultado.destino,
+
       idempotenciaPersistida:
         idempotencia?.ok !== false,
     };
   } catch (erro) {
     await finalizarIdempotencia({
       reserva,
-      estado: 'incerto',
-      canal: 'email',
+
+      estado:
+        'incerto',
+
+      canal:
+        'email',
+
       clienteNome,
       osNome,
       resumo,
@@ -665,10 +730,18 @@ async function processarEmailDaOS({
     );
 
     return {
-      ok: false,
-      enviado: false,
-      ignorado: false,
-      motivo: 'erro-email',
+      ok:
+        false,
+
+      enviado:
+        false,
+
+      ignorado:
+        false,
+
+      motivo:
+        'erro-email',
+
       mensagem:
         erro?.message ||
         String(erro),
@@ -703,7 +776,8 @@ async function processarWhatsAppDaOS({
     CONFIG.whatsappExigirEmailEnviado &&
     !emailConfirmado(emailResultado)
   ) {
-    resumo.whatsapp.bloqueadosPorEmail += 1;
+    resumo.whatsapp
+      .bloqueadosPorEmail += 1;
 
     console.warn(
       `  [WHATSAPP PULADO] ` +
@@ -712,10 +786,18 @@ async function processarWhatsAppDaOS({
     );
 
     return {
-      ok: true,
-      enviado: false,
-      simulado: false,
-      ignorado: true,
+      ok:
+        true,
+
+      enviado:
+        false,
+
+      simulado:
+        false,
+
+      ignorado:
+        true,
+
       motivo:
         'email-nao-confirmado',
     };
@@ -734,23 +816,48 @@ async function processarWhatsAppDaOS({
         });
 
       if (preparado?.ok) {
+        const destinos =
+          Array.isArray(preparado.envios)
+            ? preparado.envios
+                .map(
+                  item =>
+                    item.payload?.to || ''
+                )
+                .filter(Boolean)
+                .sort()
+                .join('|')
+            : preparado.payload?.to || '';
+
+        const conteudo =
+          Array.isArray(preparado.envios)
+            ? preparado.envios
+                .map(item => item.payload)
+            : preparado.payload;
+
         const hash = criarHashEnvio({
-          canal: 'whatsapp',
+          canal:
+            'whatsapp',
+
           clienteId:
             cliente?.clienteId || '',
+
           osId:
             ordem?.osId || '',
+
           destino:
-            preparado.payload?.to || '',
-          conteudo:
-            preparado.payload,
+            destinos,
+
+          conteudo,
         });
 
         const controle =
           await reservarEnvio({
-            canal: 'whatsapp',
+            canal:
+              'whatsapp',
+
             osId:
               ordem?.osId || '',
+
             hash,
           });
 
@@ -761,7 +868,9 @@ async function processarWhatsAppDaOS({
           const bloqueado =
             resultadoBloqueadoPorIdempotencia({
               controle,
-              canal: 'whatsapp',
+              canal:
+                'whatsapp',
+
               clienteNome,
               osNome,
               resumo,
@@ -791,8 +900,13 @@ async function processarWhatsAppDaOS({
         (
           await finalizarIdempotencia({
             reserva,
-            estado: 'enviado',
-            canal: 'whatsapp',
+
+            estado:
+              'enviado',
+
+            canal:
+              'whatsapp',
+
             clienteNome,
             osNome,
             resumo,
@@ -807,11 +921,15 @@ async function processarWhatsAppDaOS({
 
       await finalizarIdempotencia({
         reserva,
+
         estado:
           incerto
             ? 'incerto'
             : 'falhou',
-        canal: 'whatsapp',
+
+        canal:
+          'whatsapp',
+
         clienteNome,
         osNome,
         resumo,
@@ -827,8 +945,13 @@ async function processarWhatsAppDaOS({
   } catch (erro) {
     await finalizarIdempotencia({
       reserva,
-      estado: 'incerto',
-      canal: 'whatsapp',
+
+      estado:
+        'incerto',
+
+      canal:
+        'whatsapp',
+
       clienteNome,
       osNome,
       resumo,
@@ -843,12 +966,21 @@ async function processarWhatsAppDaOS({
     );
 
     return {
-      ok: false,
-      enviado: false,
-      simulado: false,
-      ignorado: false,
+      ok:
+        false,
+
+      enviado:
+        false,
+
+      simulado:
+        false,
+
+      ignorado:
+        false,
+
       motivo:
         'erro-whatsapp-nao-tratado',
+
       mensagem:
         erro?.message ||
         String(erro),
@@ -870,6 +1002,7 @@ async function executarInternamente(
     opcoes.ignorarData === true;
 
   console.log('');
+
   console.log(
     `[${agoraFormatado()}] ` +
     `Iniciando processamento diário da ITR.`
@@ -930,6 +1063,7 @@ async function executarInternamente(
       });
   } catch (erro) {
     resumo.ok = false;
+
     resumo.motivo =
       'falha-consulta-airtable';
 
@@ -1027,6 +1161,7 @@ async function executarInternamente(
       resumo.ordensProcessadas += 1;
 
       console.log('');
+
       console.log(
         `Processando: ` +
         `${clienteNome} / ${osNome} / ` +
@@ -1064,8 +1199,8 @@ async function executarInternamente(
       //
       // Não existe loop por amostra aqui.
       //
-      // Portanto:
-      // uma OS = uma única chamada ao enviarWhatsAppDaOS().
+      // O enviar_whatsapp.js realiza internamente um envio para
+      // cada número válido do cliente.
       // ------------------------------------------------------
 
       const whatsappResultado =
@@ -1098,38 +1233,49 @@ async function executarInternamente(
     Date.now() - inicioMs;
 
   console.log('');
-  console.log('================ RESUMO ================');
 
   console.log(
-    `Clientes: ${resumo.clientesEncontrados}`
+    '================ RESUMO ================'
   );
 
   console.log(
-    `Ordens encontradas: ${resumo.ordensEncontradas}`
+    `Clientes: ` +
+    `${resumo.clientesEncontrados}`
   );
 
   console.log(
-    `Ordens processadas: ${resumo.ordensProcessadas}`
+    `Ordens encontradas: ` +
+    `${resumo.ordensEncontradas}`
   );
 
   console.log(
-    `Ordens sem linhas: ${resumo.ordensSemLinhas}`
+    `Ordens processadas: ` +
+    `${resumo.ordensProcessadas}`
   );
 
   console.log(
-    `E-mails enviados: ${resumo.email.enviados}`
+    `Ordens sem linhas: ` +
+    `${resumo.ordensSemLinhas}`
   );
 
   console.log(
-    `E-mails com falha: ${resumo.email.falhas}`
+    `E-mails enviados: ` +
+    `${resumo.email.enviados}`
   );
 
   console.log(
-    `OS sem e-mail: ${resumo.email.semDestino}`
+    `E-mails com falha: ` +
+    `${resumo.email.falhas}`
   );
 
   console.log(
-    `E-mails desativados: ${resumo.email.desativados}`
+    `OS sem e-mail: ` +
+    `${resumo.email.semDestino}`
+  );
+
+  console.log(
+    `E-mails desativados: ` +
+    `${resumo.email.desativados}`
   );
 
   console.log(
@@ -1143,23 +1289,38 @@ async function executarInternamente(
   );
 
   console.log(
-    `WhatsApps enviados: ${resumo.whatsapp.enviados}`
+    `OS com WhatsApp enviado: ` +
+    `${resumo.whatsapp.enviados}`
   );
 
   console.log(
-    `WhatsApps simulados: ${resumo.whatsapp.simulados}`
+    `Destinatários de WhatsApp enviados: ` +
+    `${resumo.whatsapp.destinatariosEnviados}`
   );
 
   console.log(
-    `WhatsApps com falha: ${resumo.whatsapp.falhas}`
+    `Destinatários de WhatsApp com falha: ` +
+    `${resumo.whatsapp.destinatariosComFalha}`
   );
 
   console.log(
-    `WhatsApps ignorados: ${resumo.whatsapp.ignorados}`
+    `WhatsApps simulados: ` +
+    `${resumo.whatsapp.simulados}`
   );
 
   console.log(
-    `WhatsApps desativados: ${resumo.whatsapp.desativados}`
+    `OS com falha no WhatsApp: ` +
+    `${resumo.whatsapp.falhas}`
+  );
+
+  console.log(
+    `WhatsApps ignorados: ` +
+    `${resumo.whatsapp.ignorados}`
+  );
+
+  console.log(
+    `WhatsApps desativados: ` +
+    `${resumo.whatsapp.desativados}`
   );
 
   console.log(
@@ -1178,10 +1339,13 @@ async function executarInternamente(
   );
 
   console.log(
-    `Duração: ${resumo.duracaoMs} ms`
+    `Duração: ` +
+    `${resumo.duracaoMs} ms`
   );
 
-  console.log('========================================');
+  console.log(
+    '========================================'
+  );
 
   console.log(
     `[${agoraFormatado()}] ` +
@@ -1207,8 +1371,12 @@ async function executarEnvioDiario(
     );
 
     return {
-      ok: false,
-      executado: false,
+      ok:
+        false,
+
+      executado:
+        false,
+
       motivo:
         'execucao-ja-em-andamento',
     };
@@ -1243,13 +1411,6 @@ module.exports = {
 // ============================================================
 // EXECUÇÃO DIRETA PELO TERMINAL
 // ============================================================
-//
-// Normal:
-// node enviar_todos.js
-//
-// Ignorando a data:
-// node enviar_todos.js --ignorar-data
-// ============================================================
 
 if (require.main === module) {
   const ignorarData =
@@ -1259,7 +1420,8 @@ if (require.main === module) {
 
   executarEnvioDiario({
     ignorarData,
-    origem: 'terminal',
+    origem:
+      'terminal',
   })
     .then(resultado => {
       if (

@@ -609,24 +609,72 @@ function validarBloqueioNumeroCompartilhado() {
   );
 }
 
+function validarMultiplosContatosPermitidos() {
+  const resultado =
+    validarSegurancaWhatsappCliente(
+      clienteBase({
+        whatsapp:
+          '61999999999',
+
+        whatsappsEncontrados: [
+          '61999999999',
+          '61977776666',
+        ],
+
+        whatsappsParaEnvio: [
+          '61999999999',
+          '61977776666',
+        ],
+
+        whatsappAmbiguo:
+          false,
+
+        whatsappSeguroParaEnvio:
+          true,
+      }),
+      {
+        modoTeste: false,
+      }
+    );
+
+  assert.equal(
+    resultado.ok,
+    true
+  );
+
+  assert.equal(
+    resultado.telefonesCliente.length,
+    2
+  );
+
+  assert.equal(
+    resultado.quantidadeNumerosEncontrados,
+    2
+  );
+}
+
 function validarBloqueioContatoAmbiguo() {
   const resultado =
-    prepararComCliente({
-      whatsappAmbiguo:
-        true,
+    validarSegurancaWhatsappCliente(
+      clienteBase({
+        whatsappAmbiguo:
+          true,
 
-      whatsappsEncontrados: [
-        '5561999999999',
-        '5561977776666',
-      ],
+        whatsappsEncontrados: [
+          '5561999999999',
+        ],
 
-      whatsappSeguroParaEnvio:
-        false,
+        whatsappSeguroParaEnvio:
+          true,
 
-      whatsappMotivosBloqueio: [
-        'cliente-com-mais-de-um-whatsapp',
-      ],
-    });
+        whatsappMotivosBloqueio: [
+          'whatsapp-ambiguo',
+        ],
+      }),
+      {
+        modoTeste: false,
+      }
+    );
 
   assert.equal(
     resultado.ok,
@@ -635,27 +683,7 @@ function validarBloqueioContatoAmbiguo() {
 
   assert.equal(
     resultado.motivo,
-    'cliente-com-mais-de-um-whatsapp'
-  );
-
-  assert.equal(
-    resultado.quantidadeNumerosEncontrados,
-    2
-  );
-
-  assert.equal(
-    Array.isArray(
-      resultado.numerosMascarados
-    ),
-    true
-  );
-
-  assert.equal(
-    Object.hasOwn(
-      resultado,
-      'numeros'
-    ),
-    false
+    'whatsapp-ambiguo'
   );
 }
 
@@ -982,6 +1010,7 @@ function executar() {
   validarBloqueioContatoInseguro();
   validarBloqueioMarcadoNoAirtable();
   validarBloqueioNumeroCompartilhado();
+  validarMultiplosContatosPermitidos();
   validarBloqueioContatoAmbiguo();
   validarBloqueioContatoInvalido();
   validarBloqueioPorListaDoAmbiente();
@@ -995,7 +1024,7 @@ function executar() {
   );
 
   console.log(
-    'TESTES EXECUTADOS: 16'
+    'TESTES EXECUTADOS: 17'
   );
 
   console.log(

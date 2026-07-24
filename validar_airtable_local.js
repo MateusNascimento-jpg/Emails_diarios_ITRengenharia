@@ -21,12 +21,13 @@
 // 2. ignorarData=true não remove a trava de início.
 // 3. Histórico só é acessível em auditoria explícita.
 // 4. Data sem horário/fuso é recusada no fluxo operacional.
-// 5. Telefone compartilhado entre clientes é bloqueado.
-// 6. Número presente na lista de bloqueados é recusado.
-// 7. Linhas duplicadas são consolidadas.
-// 8. Contatos antigos podem complementar registros recentes.
-// 9. Registros sem cliente ou sem OS são ignorados com segurança.
-// 10. Status não permitido não entra no processamento.
+// 5. Mais de um número no mesmo cliente é permitido.
+// 6. Telefone compartilhado entre clientes é bloqueado.
+// 7. Número presente na lista de bloqueados é recusado.
+// 8. Linhas duplicadas são consolidadas.
+// 9. Contatos antigos podem complementar registros recentes.
+// 10. Registros sem cliente ou sem OS são ignorados.
+// 11. Status não permitido não entra no processamento.
 //
 // ============================================================
 
@@ -36,12 +37,6 @@
 // ============================================================
 // AMBIENTE ISOLADO DOS TESTES
 // ============================================================
-//
-// Todos os nomes dos campos são definidos explicitamente antes
-// do require do airtable.js.
-//
-// Isso impede que os testes herdem mapeamentos diferentes do
-// .env real da aplicação.
 
 process.env.APP_TIMEZONE =
   'America/Sao_Paulo';
@@ -138,7 +133,7 @@ process.env.AIRTABLE_CAMPO_DATA_ATUALIZACAO =
 // Número fictício usado apenas no teste local.
 process.env.WHATSAPP_NUMEROS_BLOQUEADOS =
   '5561999998450';
-  
+
 const assert =
   require('node:assert/strict');
 
@@ -193,7 +188,7 @@ function criarRegistro({
     ).padStart(4, '0')}`;
 
   const fields = {
-    'Cliente':
+    Cliente:
       clienteId
         ? [clienteId]
         : undefined,
@@ -233,7 +228,7 @@ function criarRegistro({
     'Status Cliente':
       statusCliente,
 
-    'Status':
+    Status:
       status,
 
     'Data de Conclusão do Ensaio':
@@ -246,8 +241,6 @@ function criarRegistro({
       dataAtualizacao,
   };
 
-  // Remove propriedades undefined para reproduzir melhor
-  // o formato real retornado pelo Airtable.
   for (
     const chave
     of Object.keys(fields)
@@ -287,17 +280,6 @@ function totalLinhas(clientes) {
         0
       ),
     0
-  );
-}
-
-function localizarCliente(
-  clientes,
-  clienteId
-) {
-  return clientes.find(
-    cliente =>
-      cliente.clienteId ===
-      clienteId
   );
 }
 
@@ -547,7 +529,131 @@ function validarDataSemInstante() {
 }
 
 // ============================================================
-// TESTE 6 — TELEFONE COMPARTILHADO
+// TESTE 6 — MÚLTIPLOS TELEFONES NO MESMO CLIENTE
+// ============================================================
+
+function validarMultiplosTelefonesMesmoCliente() {
+  const registros = [
+    criarRegistro({
+      clienteId:
+        'recClienteMultiplos',
+
+      osId:
+        'recOSMultiplos',
+
+      clienteNome:
+        'Cliente com dois contatos',
+
+      whatsapp:
+        '61999999999; 61977776666',
+
+      idTrabalho:
+        'TRAB-MULTI-1',
+    }),
+  ];
+
+  const resultado =
+    agruparPorClienteEOSDetalhado(
+      registros,
+      {
+        ignorarData: true,
+      }
+    );
+
+  assert.equal(
+    resultado.clientes.length,
+    1
+  );
+
+  const cliente =
+    resultado.clientes[0];
+
+  assert.equal(
+    cliente.whatsappsEncontrados.length,
+    2
+  );
+
+  assert.equal(
+    cliente.whatsappsParaEnvio.length,
+    2
+  );
+
+  assert.equal(
+    cliente.whatsappAmbiguo,
+    false
+  );
+
+  assert.equal(
+    cliente.whatsappSeguroParaEnvio,
+    true
+  );
+
+  assert.equal(
+    cliente.whatsappMotivosBloqueio.includes(
+      'mais-de-um-numero-no-cliente'
+    ),
+    false
+  );
+}
+
+// ============================================================
+// TESTE 7 — TELEFONE REPETIDO NO MESMO CAMPO É DEDUPLICADO
+// ============================================================
+
+function validarTelefoneRepetidoNoMesmoCliente() {
+  const registros = [
+    criarRegistro({
+      clienteId:
+        'recClienteDuplicado',
+
+      osId:
+        'recOSDuplicado',
+
+      clienteNome:
+        'Cliente telefone repetido',
+
+      whatsapp:
+        '61999999999; (61) 99999-9999; +55 61 99999-9999',
+
+      idTrabalho:
+        'TRAB-DUP-TEL',
+    }),
+  ];
+
+  const resultado =
+    agruparPorClienteEOSDetalhado(
+      registros,
+      {
+        ignorarData: true,
+      }
+    );
+
+  assert.equal(
+    resultado.clientes.length,
+    1
+  );
+
+  const cliente =
+    resultado.clientes[0];
+
+  assert.equal(
+    cliente.whatsappsEncontrados.length,
+    1
+  );
+
+  assert.equal(
+    cliente.whatsappsParaEnvio.length,
+    1
+  );
+
+  assert.equal(
+    cliente.whatsappSeguroParaEnvio,
+    true
+  );
+}
+
+// ============================================================
+// TESTE 8 — TELEFONE COMPARTILHADO ENTRE CLIENTES
 // ============================================================
 
 function validarTelefoneCompartilhado() {
@@ -653,7 +759,82 @@ function validarTelefoneCompartilhado() {
 }
 
 // ============================================================
-// TESTE 7 — NÚMERO BLOQUEADO
+// TESTE 9 — UM DOS NÚMEROS É COMPARTILHADO
+// ============================================================
+
+function validarUmDosNumerosCompartilhado() {
+  const registros = [
+    criarRegistro({
+      clienteId:
+        'recClienteDoisA',
+
+      osId:
+        'recOSDoisA',
+
+      clienteNome:
+        'Cliente Dois A',
+
+      whatsapp:
+        '61911112222; 61933334444',
+
+      idTrabalho:
+        'TRAB-DOIS-A',
+    }),
+
+    criarRegistro({
+      clienteId:
+        'recClienteDoisB',
+
+      osId:
+        'recOSDoisB',
+
+      clienteNome:
+        'Cliente Dois B',
+
+      whatsapp:
+        '61933334444',
+
+      idTrabalho:
+        'TRAB-DOIS-B',
+    }),
+  ];
+
+  const resultado =
+    agruparPorClienteEOSDetalhado(
+      registros,
+      {
+        ignorarData: true,
+      }
+    );
+
+  const clienteA =
+    resultado.clientes.find(
+      cliente =>
+        cliente.clienteId ===
+        'recClienteDoisA'
+    );
+
+  assert.ok(clienteA);
+
+  assert.equal(
+    clienteA.whatsappsEncontrados.length,
+    2
+  );
+
+  assert.equal(
+    clienteA
+      .whatsappDuplicadoEntreClientes,
+    true
+  );
+
+  assert.equal(
+    clienteA.whatsappSeguroParaEnvio,
+    false
+  );
+}
+
+// ============================================================
+// TESTE 10 — NÚMERO BLOQUEADO
 // ============================================================
 
 function validarNumeroBloqueado() {
@@ -715,7 +896,60 @@ function validarNumeroBloqueado() {
 }
 
 // ============================================================
-// TESTE 8 — DEDUPLICAÇÃO
+// TESTE 11 — UM DOS NÚMEROS ESTÁ BLOQUEADO
+// ============================================================
+
+function validarUmDosNumerosBloqueado() {
+  const registros = [
+    criarRegistro({
+      clienteId:
+        'recParcialBloqueado',
+
+      osId:
+        'recOSParcialBloqueado',
+
+      clienteNome:
+        'Cliente Parcialmente Bloqueado',
+
+      whatsapp:
+        '61977776666; 61999998450',
+
+      idTrabalho:
+        'TRAB-PARCIAL-BLOQ',
+    }),
+  ];
+
+  const resultado =
+    agruparPorClienteEOSDetalhado(
+      registros,
+      {
+        ignorarData: true,
+      }
+    );
+
+  const cliente =
+    resultado.clientes[0];
+
+  assert.ok(cliente);
+
+  assert.equal(
+    cliente.whatsappsEncontrados.length,
+    2
+  );
+
+  assert.equal(
+    cliente.whatsappBloqueado,
+    true
+  );
+
+  assert.equal(
+    cliente.whatsappSeguroParaEnvio,
+    false
+  );
+}
+
+// ============================================================
+// TESTE 12 — DEDUPLICAÇÃO DAS LINHAS
 // ============================================================
 
 function validarDeduplicacao() {
@@ -754,12 +988,14 @@ function validarDeduplicacao() {
   const registros = [
     criarRegistro({
       ...dadosBase,
+
       recordId:
         'recLinhaDuplicada01',
     }),
 
     criarRegistro({
       ...dadosBase,
+
       recordId:
         'recLinhaDuplicada02',
     }),
@@ -799,12 +1035,11 @@ function validarDeduplicacao() {
 }
 
 // ============================================================
-// TESTE 9 — CONTATO ANTIGO COMPLEMENTA REGISTRO RECENTE
+// TESTE 13 — CONTATO ANTIGO COMPLEMENTA REGISTRO RECENTE
 // ============================================================
 
 function validarConsolidacaoGlobalDeContatos() {
   const registros = [
-    // Registro histórico contém o telefone.
     criarRegistro({
       clienteId:
         'recContatoGlobal',
@@ -816,7 +1051,7 @@ function validarConsolidacaoGlobalDeContatos() {
         'Cliente Contato Global',
 
       whatsapp:
-        '61977776666',
+        '61977776666; 61988885555',
 
       email:
         'contato.global@example.com',
@@ -828,7 +1063,6 @@ function validarConsolidacaoGlobalDeContatos() {
         '2025-01-01T10:00:00-03:00',
     }),
 
-    // Registro recente não contém os contatos.
     criarRegistro({
       clienteId:
         'recContatoGlobal',
@@ -871,7 +1105,7 @@ function validarConsolidacaoGlobalDeContatos() {
 
   assert.equal(
     cliente.whatsappsEncontrados.length,
-    1
+    2
   );
 
   assert.equal(
@@ -884,7 +1118,6 @@ function validarConsolidacaoGlobalDeContatos() {
     true
   );
 
-  // Somente a OS posterior ao marco deve entrar.
   assert.equal(
     cliente.ordens.length,
     1
@@ -897,7 +1130,7 @@ function validarConsolidacaoGlobalDeContatos() {
 }
 
 // ============================================================
-// TESTE 10 — REGISTROS INCOMPLETOS
+// TESTE 14 — REGISTROS INCOMPLETOS
 // ============================================================
 
 function validarRegistrosIncompletos() {
@@ -952,7 +1185,7 @@ function validarRegistrosIncompletos() {
 }
 
 // ============================================================
-// TESTE 11 — STATUS NÃO PERMITIDO
+// TESTE 15 — STATUS NÃO PERMITIDO
 // ============================================================
 
 function validarStatusNaoPermitido() {
@@ -990,7 +1223,7 @@ function validarStatusNaoPermitido() {
 }
 
 // ============================================================
-// TESTE 12 — COMPATIBILIDADE DO RETORNO ANTIGO
+// TESTE 16 — COMPATIBILIDADE DO RETORNO ANTIGO
 // ============================================================
 
 function validarCompatibilidade() {
@@ -1028,7 +1261,7 @@ function validarCompatibilidade() {
 }
 
 // ============================================================
-// TESTE 13 — QUALIDADE DOS CONTATOS
+// TESTE 17 — QUALIDADE DOS CONTATOS
 // ============================================================
 
 function validarRelatorioDeQualidade() {
@@ -1044,7 +1277,7 @@ function validarRelatorioDeQualidade() {
         'Cliente Qualidade',
 
       whatsapp:
-        '61966665555',
+        '61966665555; 61955554444',
 
       email:
         'qualidade@example.com',
@@ -1078,7 +1311,7 @@ function validarRelatorioDeQualidade() {
   assert.equal(
     qualidade[0]
       .quantidadeWhatsapps,
-    1
+    2
   );
 
   assert.equal(
@@ -1089,7 +1322,7 @@ function validarRelatorioDeQualidade() {
 }
 
 // ============================================================
-// TESTE 14 — NORMALIZAÇÃO DO TELEFONE
+// TESTE 18 — NORMALIZAÇÃO DO TELEFONE
 // ============================================================
 
 function validarNormalizacaoTelefone() {
@@ -1149,8 +1382,14 @@ function executar() {
   validarHistoricoBloqueado();
   validarAuditoriaHistorica();
   validarDataSemInstante();
+
+  validarMultiplosTelefonesMesmoCliente();
+  validarTelefoneRepetidoNoMesmoCliente();
   validarTelefoneCompartilhado();
+  validarUmDosNumerosCompartilhado();
   validarNumeroBloqueado();
+  validarUmDosNumerosBloqueado();
+
   validarDeduplicacao();
   validarConsolidacaoGlobalDeContatos();
   validarRegistrosIncompletos();
@@ -1164,7 +1403,7 @@ function executar() {
   );
 
   console.log(
-    'TESTES EXECUTADOS: 14'
+    'TESTES EXECUTADOS: 18'
   );
 
   console.log(
@@ -1188,7 +1427,15 @@ function executar() {
   );
 
   console.log(
-    'TELEFONES COMPARTILHADOS: BLOQUEADOS'
+    'MÚLTIPLOS NÚMEROS DO MESMO CLIENTE: PERMITIDOS'
+  );
+
+  console.log(
+    'TELEFONES REPETIDOS: DEDUPLICADOS'
+  );
+
+  console.log(
+    'TELEFONES COMPARTILHADOS ENTRE CLIENTES: BLOQUEADOS'
   );
 
   console.log(
