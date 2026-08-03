@@ -186,7 +186,7 @@ app.get('/health', (req, res) => {
 });
 
 // O webhook precisa guardar os bytes originais para validar
-// X-Hub-Signature-256 com HMAC-SHA256.
+// X-Hub-Signature-256 com HMAC-SHA256 (enviar dados de forma eficiente).
 
 const webhookJsonParser = express.json({
   limit: CONFIG.webhookJsonLimite,
@@ -249,7 +249,7 @@ function compararSegredos(recebido, esperado) {
   ) {
     return false;
   }
-
+// Use timingSafeEqual para evitar ataques de tempo
   return crypto.timingSafeEqual(
     bufferRecebido,
     bufferEsperado
@@ -259,7 +259,7 @@ function compararSegredos(recebido, esperado) {
 function somenteDigitos(valor) {
   return String(valor || '').replace(/\D/g, '');
 }
-
+//Mascarando telefone para garantir que é um número válido
 function mascararTelefone(valor) {
   const digitos = somenteDigitos(valor);
 
@@ -423,7 +423,7 @@ function resumoSeguroWebhook() {
       estado.webhook.ultimoErro,
   };
 }
-
+//Validar assinatura do webhook do WhatsApp utilizando máscara HMAC-SHA256
 function assinaturaWebhookValida(req) {
   if (!CONFIG.webhookValidarAssinatura) {
     return true;
