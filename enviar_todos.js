@@ -860,7 +860,7 @@ async function processarWhatsAppDaOS({
 
             hash,
           });
-          
+
         if (
           controle?.bloqueado === true ||
           controle?.ok === false
