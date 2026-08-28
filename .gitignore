@@ -10,4 +10,6 @@ ver_linhas.js
 testar.js
 preview_email.html
 preview.png
-# IMPORTANTE: assets/logo.png DEVE subir (nao ignorar!)
+# IMPORTANTE: assets/logo.png DEVE subir (nao ignorar!).env.*
+.env.*
+!.env.example

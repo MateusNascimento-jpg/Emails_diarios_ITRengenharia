@@ -916,6 +916,24 @@ function montarVariaveisDaOS(
           cliente?.clienteId
         ),
 
+      cnpj:
+        limparTexto(
+          cliente?.cnpj,
+          '-'
+        ),
+
+      senha_inicial:
+        limparTexto(
+          cliente?.email,
+          '-'
+        ),
+
+      email_acesso:
+        limparTexto(
+          cliente?.email,
+          '-'
+        ),
+
       quantidade_itens:
         String(
           itens.length

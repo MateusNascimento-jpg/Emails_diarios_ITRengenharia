@@ -66,12 +66,10 @@ function montarEmailDaOS(cliente, ordem) {
   const nomeCliente = cliente.clienteNome || 'Cliente';
   const os = ordem.osNome || 'Ordem de Serviço';
 
-  // Dados de acesso ao portal
-  // Regra atual pedida:
-  // Usuario de login = CNPJ
-  // Senha de login do portal = Email Cliente
+  // Dados de primeiro acesso ao Portal. O e-mail é apenas a credencial
+  // inicial: depois da ativação, o cliente usa CNPJ + senha pessoal.
   const usuarioLogin = cliente.cnpj || '-';
-  const senhaLoginPortal = cliente.email || '-';
+  const senhaInicialPortal = cliente.email || '-';
 
   // data das alteracoes = ONTEM (o email de manha reporta o dia anterior),
   // formatada por extenso no fuso de Brasilia. Ex: "07 de julho de 2026"
@@ -131,12 +129,16 @@ function montarEmailDaOS(cliente, ordem) {
 
         <div style="margin:14px 0 18px;padding:14px 16px;background:#f7f8fa;border:1px solid #e6e9ef;border-radius:10px;">
           <p style="margin:0 0 8px;font-size:13px;line-height:1.5;color:#374151;">
-            <strong style="color:#0f2543;">Usuário de login:</strong> ${esc(usuarioLogin)}
+            <strong style="color:#0f2543;">CNPJ de acesso:</strong> ${esc(usuarioLogin)}
           </p>
           <p style="margin:0;font-size:13px;line-height:1.5;color:#374151;">
-            <strong style="color:#0f2543;">Senha de login do portal:</strong> ${esc(senhaLoginPortal)}
+            <strong style="color:#0f2543;">Senha inicial (somente no primeiro acesso):</strong> ${esc(senhaInicialPortal)}
           </p>
         </div>
+
+        <p style="margin:0 0 16px;font-size:12.5px;line-height:1.6;color:#6b7280;">
+          No primeiro acesso, o Portal solicitará a criação de uma senha pessoal. Depois disso, o e-mail acima não funcionará mais como senha.
+        </p>
 
         <p style="margin:16px 0 4px;font-size:14px;line-height:1.6;color:#374151;">
           Permanecemos à disposição para qualquer esclarecimento.
@@ -166,8 +168,9 @@ function montarEmailDaOS(cliente, ordem) {
         `- Amostra ${l.amostra || '-'} | ${l.ensaioNome || l.ensaioSigla || '-'} | ${statusExibido(l.status)}`
       ).join('\n')
     + `\n\nSegue link para o acompanhamento de suas amostras:\nhttps://portal.itr.eng.br/login.html`
-    + `\n\nUsuário de login: ${usuarioLogin}`
-    + `\nSenha de login do portal: ${senhaLoginPortal}`
+    + `\n\nCNPJ de acesso: ${usuarioLogin}`
+    + `\nSenha inicial (somente no primeiro acesso): ${senhaInicialPortal}`
+    + `\nNo primeiro acesso, crie sua senha pessoal. Depois disso, use CNPJ + sua senha. `
     + `\n\nAtenciosamente,\nEquipe ITR Engenharia`;
 
   return { assunto, html, texto };
