@@ -40,3 +40,28 @@ Para testar sem filtro de data, ainda com tudo redirecionado para o e-mail de te
 `/disparar-agora?chave=SUA_CHAVE&ignorarData=1`
 
 Nunca versionar `.env`.
+
+## Portal ITR 3.1 — notificações de segurança
+
+A versão 2.1 deste serviço também recebe eventos transacionais fechados do Portal em:
+
+`POST /internal/portal/security-notification`
+
+O endpoint não aceita HTML, destinatário arbitrário ou texto livre. Ele aceita somente `FIRST_ACCESS`, `PASSWORD_RESET`, `PASSWORD_CREATED` e `PASSWORD_CHANGED`, valida o e-mail e, quando existe link de ação, exige HTTPS + o mesmo domínio configurado em `PORTAL_ORIGIN`.
+
+A autenticação entre serviços usa HMAC-SHA256 + timestamp + nonce. Configure o mesmo segredo Base64 de 32+ bytes nos dois serviços:
+
+- aqui: `PORTAL_INTERNAL_HMAC_SECRET`
+- Portal: `PORTAL_NOTIFICATIONS_HMAC_SECRET`
+
+O e-mail contém o link de primeiro acesso/reset. O aviso por WhatsApp é opcional e **não recebe token nem link de redefinição**.
+
+### Comunicação diária
+
+O e-mail diário passou a apresentar:
+
+- `CNPJ de acesso`
+- `Senha inicial (somente no primeiro acesso)` = e-mail cadastrado
+- explicação de que depois da ativação o acesso é CNPJ + senha pessoal.
+
+O contexto do template WhatsApp também oferece `cnpj`, `senha_inicial` e `email_acesso`. Use esses campos apenas no template aprovado para explicar o primeiro acesso.

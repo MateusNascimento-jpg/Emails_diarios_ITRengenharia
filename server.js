@@ -15,6 +15,8 @@ const {
   existeExecucaoEmAndamento,
 } = require('./enviar_todos.js');
 
+const { processarNotificacaoSeguranca } = require('./security_notifications.js');
+
 // ============================================================
 // AMBIENTE
 // ============================================================
@@ -111,6 +113,15 @@ const CONFIG = Object.freeze({
     process.env.SERVIDOR_REQUEST_TIMEOUT_MS,
     900000
   ),
+
+  portalInternalHmacSecret: textoEnv(
+    'PORTAL_INTERNAL_HMAC_SECRET'
+  ),
+
+  portalInternalMaxSkewSeconds: numeroInteiroPositivo(
+    process.env.PORTAL_INTERNAL_MAX_SKEW_SECONDS,
+    300
+  ),
 });
 
 // ============================================================
@@ -196,6 +207,58 @@ const webhookJsonParser = express.json({
     req.rawBody = Buffer.from(buffer);
   },
 });
+
+
+const portalInternalJsonParser = express.json({
+  limit: '16kb',
+  strict: true,
+  verify: (req, res, buffer) => {
+    req.portalRawBody = Buffer.from(buffer);
+  },
+});
+
+const noncesPortal = new Map();
+function limparNoncesPortal(agora = Date.now()) {
+  for (const [nonce, expira] of noncesPortal.entries()) {
+    if (expira <= agora) noncesPortal.delete(nonce);
+  }
+  if (noncesPortal.size > 5000) {
+    const excedente = noncesPortal.size - 4000;
+    Array.from(noncesPortal.keys()).slice(0, excedente).forEach(chave => noncesPortal.delete(chave));
+  }
+}
+function segredoPortalInterno() {
+  try {
+    const buffer = Buffer.from(CONFIG.portalInternalHmacSecret, 'base64');
+    return buffer.length >= 32 ? buffer : null;
+  } catch (_) { return null; }
+}
+function assinaturaPortalValida(req) {
+  const secret = segredoPortalInterno();
+  if (!secret) return { ok:false, status:503, motivo:'segredo-nao-configurado' };
+  const timestamp = String(req.get('x-itr-timestamp') || '');
+  const nonce = String(req.get('x-itr-nonce') || '');
+  const signature = String(req.get('x-itr-signature') || '').toLowerCase();
+  if (!/^\d{10,13}$/.test(timestamp) || !/^[A-Za-z0-9_-]{16,128}$/.test(nonce) || !/^[a-f0-9]{64}$/.test(signature)) {
+    return { ok:false, status:401, motivo:'assinatura-invalida' };
+  }
+  const agoraSegundos = Math.floor(Date.now()/1000);
+  const ts = Number(timestamp);
+  if (!Number.isFinite(ts) || Math.abs(agoraSegundos-ts) > CONFIG.portalInternalMaxSkewSeconds) {
+    return { ok:false, status:401, motivo:'timestamp-invalido' };
+  }
+  limparNoncesPortal();
+  if (noncesPortal.has(nonce)) return { ok:false, status:409, motivo:'nonce-repetido' };
+  const raw = Buffer.isBuffer(req.portalRawBody) ? req.portalRawBody : Buffer.from('');
+  const expected = crypto.createHmac('sha256', secret).update(`${timestamp}.${nonce}.`, 'utf8').update(raw).digest('hex');
+  const recebido = Buffer.from(signature, 'utf8');
+  const esperado = Buffer.from(expected, 'utf8');
+  if (recebido.length !== esperado.length || !crypto.timingSafeEqual(recebido, esperado)) {
+    return { ok:false, status:401, motivo:'assinatura-invalida' };
+  }
+  noncesPortal.set(nonce, Date.now() + CONFIG.portalInternalMaxSkewSeconds*1000);
+  return { ok:true };
+}
 
 // ============================================================
 // AUXILIARES
@@ -879,10 +942,32 @@ app.post(
   }
 );
 
+// Endpoint interno usado exclusivamente pelo Portal ITR para mensagens de segurança.
+// O corpo é autenticado com HMAC, timestamp curto e nonce de uso único.
+app.post(
+  '/internal/portal/security-notification',
+  portalInternalJsonParser,
+  async (req, res) => {
+    const auth = assinaturaPortalValida(req);
+    if (!auth.ok) {
+      if (auth.status === 503) console.error('[Portal Segurança] PORTAL_INTERNAL_HMAC_SECRET ausente ou inválido.');
+      else console.warn(`[Portal Segurança] Requisição interna recusada: ${auth.motivo}.`);
+      return res.status(auth.status).json({ ok:false, motivo:auth.motivo });
+    }
+    try {
+      const resultado = await processarNotificacaoSeguranca(req.body);
+      return res.status(200).json(resultado);
+    } catch (erro) {
+      console.error(`[Portal Segurança] Falha na notificação: ${erro.message}`);
+      return res.status(503).json({ ok:false, motivo:'notification-unavailable' });
+    }
+  }
+);
+
 // Parsers das demais rotas.
 //
-// Permanecem depois do webhook porque o webhook depende do
-// corpo bruto para validar HMAC.
+// Permanecem depois do webhook e do endpoint interno porque ambos dependem
+// dos bytes originais para validar HMAC.
 
 app.use(
   express.json({
