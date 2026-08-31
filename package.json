@@ -1,6 +1,6 @@
 {
   "name": "itr-emails-whatsapp",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "private": true,
   "description": "Automação ITR de e-mail/WhatsApp, incluindo notificações transacionais de segurança do Portal.",
   "main": "server.js",
@@ -14,14 +14,16 @@
     "preview:whatsapp:json": "node previsualizar_whatsapp.js --json",
     "preview:whatsapp:tudo:json": "node previsualizar_whatsapp.js --ignorar-data --json",
     "inspecionar": "node ver_campos.js",
-    "verificar": "node --check airtable.js && node --check email_template.js && node --check enviar_email.js && node --check whatsapp_template.js && node --check enviar_whatsapp.js && node --check idempotencia_airtable.js && node --check enviar_todos.js && node --check previsualizar_whatsapp.js && node --check validar_whatsapp_local.js && node --check teste_template_whatsapp_producao.js && node --check ver_campos.js && node --check server.js && node --check security_email_template.js && node --check security_whatsapp.js && node --check security_notifications.js",
-    "test": "npm run verificar && npm run validar:airtable && npm run validar:whatsapp && npm run validar:idempotencia",
+    "verificar": "node --check airtable.js && node --check email_template.js && node --check enviar_email.js && node --check whatsapp_template.js && node --check enviar_whatsapp.js && node --check idempotencia_airtable.js && node --check enviar_todos.js && node --check previsualizar_whatsapp.js && node --check validar_whatsapp_local.js && node --check teste_template_whatsapp_producao.js && node --check ver_campos.js && node --check config_validation.js && node --check portal_hmac.js && node --check preflight.js && node --check server.js && node --check security_validation.js && node --check security_email_template.js && node --check security_whatsapp.js && node --check security_notifications.js",
+    "test": "npm run verificar && npm run test:security && npm run validar:airtable && npm run validar:whatsapp && npm run validar:idempotencia",
     "validar:whatsapp": "node validar_whatsapp_local.js",
     "validar:airtable": "node validar_airtable_local.js",
     "validar:whatsapp:producao": "node teste_template_whatsapp_producao.js",
     "teste:whatsapp:producao:real": "node teste_template_whatsapp_producao.js --confirmar-envio-real",
     "validar:idempotencia": "node validar_idempotencia_local.js",
-    "test:security": "node --test tests/*.test.js"
+    "test:security": "node --test tests/*.test.js",
+    "preflight": "node preflight.js",
+    "audit:local": "npm run verificar && npm run test:security && npm run preflight"
   },
   "engines": {
     "node": ">=20"

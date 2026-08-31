@@ -39,6 +39,7 @@ const {
 
 const {
   enviar,
+  mascararDestinos,
   MODO_TESTE,
 } = require('./enviar_email.js');
 
@@ -672,11 +673,9 @@ async function processarEmailDaOS({
     resumo.email.enviados += 1;
 
     const destinoLog =
-      Array.isArray(
+      mascararDestinos(
         resultado.destino
-      )
-        ? resultado.destino.join(', ')
-        : resultado.destino;
+      ).join(', ');
 
     console.log(
       `  [E-MAIL OK] ` +
@@ -700,8 +699,8 @@ async function processarEmailDaOS({
       id:
         resultado.id || '',
 
-      destino:
-        resultado.destino,
+      destinoMascarado:
+        mascararDestinos(resultado.destino),
 
       idempotenciaPersistida:
         idempotencia?.ok !== false,

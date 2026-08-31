@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 node_modules/
 *.log
 saida_*.txt
@@ -10,6 +12,5 @@ ver_linhas.js
 testar.js
 preview_email.html
 preview.png
-# IMPORTANTE: assets/logo.png DEVE subir (nao ignorar!).env.*
-.env.*
-!.env.example
+
+# IMPORTANTE: assets/logo.png e assets/logo-whatsapp.jpeg devem subir.

@@ -2,11 +2,6 @@
 
 require('dotenv').config();
 
-const WABA_PRODUCAO_ESPERADA =
-  '3565240096975159';
-
-const PHONE_NUMBER_ID_ESPERADO =
-  '1187028514499369';
 
 const ARGUMENTO_ENVIO_REAL =
   '--confirmar-envio-real';
@@ -543,15 +538,31 @@ async function executar() {
     'WHATSAPP_TEMPLATE_NAME não está configurado.'
   );
 
+  const wabaEsperada =
+    textoEnv('WHATSAPP_EXPECTED_WABA_ID');
+
+  const phoneNumberIdEsperado =
+    textoEnv('WHATSAPP_EXPECTED_PHONE_NUMBER_ID');
+
+  exigir(
+    wabaEsperada,
+    'WHATSAPP_EXPECTED_WABA_ID não está configurado.'
+  );
+
+  exigir(
+    phoneNumberIdEsperado,
+    'WHATSAPP_EXPECTED_PHONE_NUMBER_ID não está configurado.'
+  );
+
   exigir(
     wabaId ===
-      WABA_PRODUCAO_ESPERADA,
+      wabaEsperada,
     'A WABA configurada não é a conta de produção esperada.'
   );
 
   exigir(
     phoneNumberId ===
-      PHONE_NUMBER_ID_ESPERADO,
+      phoneNumberIdEsperado,
     'O Phone Number ID configurado não é o número de produção esperado.'
   );
 

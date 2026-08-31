@@ -1,67 +1,172 @@
-# ITR Emails Diários
+# ITR Notificações — E-mail, WhatsApp e Segurança do Portal
 
-Aplicação Node.js para enviar e-mails diários aos clientes da ITR Engenharia com as amostras/ensaios atualizados no dia anterior.
+Serviço Node.js da ITR Engenharia para:
 
-## Regra principal
+- enviar o resumo diário por Ordem de Serviço;
+- disparar WhatsApp a partir de template aprovado;
+- receber notificações transacionais fechadas do Portal ITR;
+- aplicar HMAC, timestamp e nonce no canal Portal → Notificações;
+- manter proteção contra contatos de WhatsApp ambíguos/compartilhados;
+- oferecer idempotência persistente opcional no Airtable.
 
-- O envio automático roda às 8h no fuso `America/Sao_Paulo`.
-- O código filtra registros cujo campo `Data da Última Atualização Update` caiu no dia anterior.
-- Somente entram no e-mail os status `Aguardando Preparação` e `Enviado ao Cliente`.
-- Cada Ordem de Serviço gera um e-mail separado para o respectivo cliente.
+Versão deste pacote: **2.1.1**.
 
-## Atenção sobre Airtable
+## Antes de iniciar
 
-Se preencher `AIRTABLE_VIEW_ID`, a view escolhida não deve filtrar apenas "hoje". Ela precisa permitir que o código encontre os registros de ontem. O filtro de data correto já está no código.
+1. Use Node.js 20 ou superior.
+2. Rode `npm ci`.
+3. Copie `.env.example` para `.env` somente no ambiente local.
+4. Preserve os valores reais já existentes do ambiente.
+5. Rode:
 
-## Uso local
+```bash
+npm run preflight
+npm test
+```
 
-1. Rode `npm install`.
-2. Copie `.env.example` para `.env`.
-3. Preencha as variáveis reais no `.env`.
-4. Teste sem filtro de data com `npm run teste`.
-5. Teste o envio normal com `npm run enviar`.
-6. Suba o servidor com `npm start`.
+O serviço também valida configuração crítica no startup.
+
+### Regra importante: `EMAIL_MODO_TESTE`
+
+- vazio: envia para os destinatários reais;
+- um e-mail válido: redireciona todos os envios para esse endereço;
+- `false`, `true`, `0`, `1` ou qualquer texto que não seja e-mail: **configuração inválida e o serviço não inicia**.
+
+## Automação diária
+
+O cron padrão roda às 8h em `America/Sao_Paulo` e usa os registros permitidos pela configuração do Airtable.
+
+`AUTOMACAO_INICIO_EM` é obrigatório quando `CRON_ATIVO=true` e deve conter data/hora ISO-8601 com fuso explícito, por exemplo:
+
+```text
+2026-08-01T00:00:00-03:00
+```
+
+`ignorarData=true` não ignora automaticamente esse marco de segurança.
+
+## Portal ITR — notificações de segurança
+
+Endpoint interno:
+
+```text
+POST /internal/portal/security-notification
+```
+
+Tipos aceitos:
+
+- `FIRST_ACCESS`
+- `PASSWORD_RESET`
+- `PASSWORD_CREATED`
+- `PASSWORD_CHANGED`
+
+O endpoint não aceita HTML arbitrário. Links de primeiro acesso/reset precisam ser HTTPS, permanecer na origem configurada em `PORTAL_ORIGIN` e usar as páginas permitidas do Portal.
+
+A autenticação entre serviços usa:
+
+- HMAC-SHA256;
+- timestamp curto;
+- nonce de uso único no processo;
+- comparação em tempo constante.
+
+O mesmo segredo Base64 de 32+ bytes deve existir em:
+
+```text
+Notificações: PORTAL_INTERNAL_HMAC_SECRET
+Portal:       PORTAL_NOTIFICATIONS_HMAC_SECRET
+```
+
+## WhatsApp de segurança
+
+O alerta por WhatsApp é opcional. Ele **não recebe token nem link de redefinição**.
+
+Quando:
+
+```text
+WHATSAPP_MODO_TESTE=true
+```
+
+as notificações de segurança usam `WHATSAPP_TEST_NUMBER`, assim como o fluxo diário. Elas não usam o telefone real do cliente durante o modo teste.
+
+## Health e status
+
+Health público e mínimo:
+
+```text
+GET /health
+```
+
+Resposta esperada:
+
+```text
+OK
+```
+
+`/status` contém telemetria operacional e exige autenticação:
+
+```bash
+curl -H "X-API-Key: SUA_CHAVE" https://SEU-SERVICO/status
+```
+
+Também é aceito:
+
+```text
+Authorization: Bearer SUA_CHAVE
+```
+
+A chave não é aceita por query string.
+
+## Disparo manual
+
+Use POST e envie a chave em header:
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: SUA_CHAVE" \
+  -d '{"ignorarData":false}' \
+  https://SEU-SERVICO/disparar-agora
+```
+
+Para teste controlado sem filtro diário:
+
+```json
+{"ignorarData":true}
+```
+
+`PERMITIR_DISPARO_MANUAL_GET` deve permanecer `false` em produção.
+
+## Idempotência
+
+A proteção persistente existe, mas é deliberadamente explícita:
+
+```text
+IDEMPOTENCIA_ATIVA=false
+```
+
+Só ative depois de confirmar que os campos de idempotência existem na tabela de OS. Com a funcionalidade ativada, mantenha `IDEMPOTENCIA_FALHAR_FECHADO=true`.
+
+## Logs e privacidade
+
+O fluxo de e-mail mascara destinatários nos logs. Não registre tokens, senhas, HMACs, payloads sensíveis ou `.env` em tickets, commits ou conversas.
+
+## Scripts principais
+
+```text
+npm start                 inicia o serviço
+npm run preflight         valida configuração sem exibir segredos
+npm run verificar         node --check nos módulos
+npm run test:security     testes de segurança/hardening
+npm test                  sintaxe + segurança + validadores locais
+npm run audit:local       sintaxe + segurança + preflight
+npm run enviar            execução normal
+npm run teste             execução com ignorarData
+```
 
 ## Produção
 
-- Subir para GitHub sem `.env` e sem `node_modules`.
-- Configurar as variáveis de ambiente no Render.
-- Start command: `npm start`.
-- Usar UptimeRobot para pingar a URL do Render e evitar hibernação.
-
-## Teste manual em produção
-
-Com `EMAIL_MODO_TESTE` preenchido, acesse:
-
-`/disparar-agora?chave=SUA_CHAVE`
-
-Para testar sem filtro de data, ainda com tudo redirecionado para o e-mail de teste:
-
-`/disparar-agora?chave=SUA_CHAVE&ignorarData=1`
-
-Nunca versionar `.env`.
-
-## Portal ITR 3.1 — notificações de segurança
-
-A versão 2.1 deste serviço também recebe eventos transacionais fechados do Portal em:
-
-`POST /internal/portal/security-notification`
-
-O endpoint não aceita HTML, destinatário arbitrário ou texto livre. Ele aceita somente `FIRST_ACCESS`, `PASSWORD_RESET`, `PASSWORD_CREATED` e `PASSWORD_CHANGED`, valida o e-mail e, quando existe link de ação, exige HTTPS + o mesmo domínio configurado em `PORTAL_ORIGIN`.
-
-A autenticação entre serviços usa HMAC-SHA256 + timestamp + nonce. Configure o mesmo segredo Base64 de 32+ bytes nos dois serviços:
-
-- aqui: `PORTAL_INTERNAL_HMAC_SECRET`
-- Portal: `PORTAL_NOTIFICATIONS_HMAC_SECRET`
-
-O e-mail contém o link de primeiro acesso/reset. O aviso por WhatsApp é opcional e **não recebe token nem link de redefinição**.
-
-### Comunicação diária
-
-O e-mail diário passou a apresentar:
-
-- `CNPJ de acesso`
-- `Senha inicial (somente no primeiro acesso)` = e-mail cadastrado
-- explicação de que depois da ativação o acesso é CNPJ + senha pessoal.
-
-O contexto do template WhatsApp também oferece `cnpj`, `senha_inicial` e `email_acesso`. Use esses campos apenas no template aprovado para explicar o primeiro acesso.
+- `.env` e `node_modules` não devem ser versionados;
+- use `npm ci` no build/deploy;
+- use `/health` para monitoramento externo;
+- mantenha `/status` autenticado;
+- mantenha `PERMITIR_DISPARO_MANUAL_GET=false`;
+- não ative WhatsApp de segurança sem template aprovado e teste controlado.

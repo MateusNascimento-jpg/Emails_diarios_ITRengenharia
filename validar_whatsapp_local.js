@@ -1,64 +1,48 @@
 'use strict';
 
-process.env.WHATSAPP_TEMPLATE_NAME =
-  'atualizacao_ordem_servico';
+// Este validador deve ser hermético: nenhuma configuração real do .env
+// pode alterar o resultado dos testes locais. Definimos explicitamente
+// todas as variáveis consumidas por whatsapp_template.js/enviar_whatsapp.js
+// antes de carregar esses módulos. Valores vazios também são intencionais:
+// impedem o dotenv de repor opções de produção que não fazem parte do teste.
+const AMBIENTE_WHATSAPP_TESTE = Object.freeze({
+  WHATSAPP_TEMPLATE_NAME: 'atualizacao_ordem_servico',
+  WHATSAPP_TEMPLATE_LANGUAGE: 'pt_BR',
+  WHATSAPP_TEMPLATE_PARAMETER_MODE: 'named',
+  WHATSAPP_TEMPLATE_BODY_PARAMETERS: 'ordem_servico,detalhes',
+  WHATSAPP_FORMATO_DETALHES: 'auto',
+  WHATSAPP_DETALHES_MAX_CHARS: '800',
+  WHATSAPP_TEMPLATE_BODY_MAX_CHARS: '1024',
+  WHATSAPP_TEMPLATE_BODY_FIXED_CHARS: '306',
+  WHATSAPP_TEMPLATE_BODY_SAFETY_MARGIN: '20',
+  WHATSAPP_TEMPLATE_HEADER_TYPE: 'image',
+  WHATSAPP_TEMPLATE_HEADER_TEXT_SOURCE: '',
+  WHATSAPP_TEMPLATE_HEADER_TEXT_PARAMETER_NAME: '',
+  WHATSAPP_TEMPLATE_HEADER_MEDIA_ID: '',
+  WHATSAPP_TEMPLATE_HEADER_MEDIA_URL: 'https://emails-diarios-itrengenharia.onrender.com/assets/logo-whatsapp.jpeg',
+  WHATSAPP_TEMPLATE_HEADER_DOCUMENT_FILENAME: '',
+  WHATSAPP_TEMPLATE_BUTTONS: '',
+  PORTAL_CLIENTE_URL: 'https://portal.itr.eng.br/login.html',
+  WHATSAPP_ATIVO: 'false',
+  WHATSAPP_SIMULAR: 'true',
+  WHATSAPP_MODO_TESTE: 'true',
+  WHATSAPP_TEST_NUMBER: '5561999999999',
+  WHATSAPP_PHONE_NUMBER_ID: '123456789012345',
+  WHATSAPP_BUSINESS_ACCOUNT_ID: '',
+  WHATSAPP_ACCESS_TOKEN: 'TOKEN_LOCAL_NAO_USADO',
+  WHATSAPP_API_VERSION: 'v25.0',
+  WHATSAPP_COUNTRY_CODE: '55',
+  WHATSAPP_GRAPH_BASE_URL: 'https://graph.facebook.com',
+  WHATSAPP_TIMEOUT_MS: '20000',
+  WHATSAPP_MAX_TENTATIVAS: '1',
+  WHATSAPP_RETRY_BASE_MS: '1500',
+  WHATSAPP_LOG_PAYLOAD: 'false',
+  WHATSAPP_NUMEROS_BLOQUEADOS: '5561988887777',
+});
 
-process.env.WHATSAPP_TEMPLATE_LANGUAGE =
-  'pt_BR';
-
-process.env.WHATSAPP_TEMPLATE_PARAMETER_MODE =
-  'named';
-
-process.env.WHATSAPP_TEMPLATE_BODY_PARAMETERS =
-  'ordem_servico,detalhes';
-
-process.env.WHATSAPP_FORMATO_DETALHES =
-  'auto';
-
-process.env.WHATSAPP_DETALHES_MAX_CHARS =
-  '800';
-
-process.env.WHATSAPP_TEMPLATE_BODY_MAX_CHARS =
-  '1024';
-
-process.env.WHATSAPP_TEMPLATE_BODY_FIXED_CHARS =
-  '306';
-
-process.env.WHATSAPP_TEMPLATE_BODY_SAFETY_MARGIN =
-  '20';
-
-process.env.WHATSAPP_TEMPLATE_HEADER_TYPE =
-  'image';
-
-process.env.WHATSAPP_TEMPLATE_HEADER_MEDIA_URL =
-  'https://emails-diarios-itrengenharia.onrender.com/assets/logo-whatsapp.jpeg';
-
-process.env.WHATSAPP_ATIVO =
-  'false';
-
-process.env.WHATSAPP_SIMULAR =
-  'true';
-
-process.env.WHATSAPP_MODO_TESTE =
-  'true';
-
-process.env.WHATSAPP_TEST_NUMBER =
-  '5561999999999';
-
-process.env.WHATSAPP_PHONE_NUMBER_ID =
-  '123456789012345';
-
-process.env.WHATSAPP_ACCESS_TOKEN =
-  'TOKEN_LOCAL_NAO_USADO';
-
-process.env.WHATSAPP_API_VERSION =
-  'v25.0';
-
-process.env.WHATSAPP_COUNTRY_CODE =
-  '55';
-
-process.env.WHATSAPP_NUMEROS_BLOQUEADOS =
-  '5561988887777';
+for (const [nome, valor] of Object.entries(AMBIENTE_WHATSAPP_TESTE)) {
+  process.env[nome] = valor;
+}
 
 const assert =
   require('node:assert/strict');
@@ -260,7 +244,8 @@ function validarMensagemPequena() {
 
   assert.equal(
     resultado.ok,
-    true
+    true,
+    `Payload pequeno falhou: ${resultado.motivo || 'motivo-desconhecido'}${resultado.mensagem ? ` - ${resultado.mensagem}` : ''}`
   );
 
   assert.equal(

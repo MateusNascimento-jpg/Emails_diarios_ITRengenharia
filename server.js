@@ -16,6 +16,8 @@ const {
 } = require('./enviar_todos.js');
 
 const { processarNotificacaoSeguranca } = require('./security_notifications.js');
+const { validarAssinaturaPortal } = require('./portal_hmac.js');
+const { exigirConfiguracaoValida } = require('./config_validation.js');
 
 // ============================================================
 // AMBIENTE
@@ -218,46 +220,17 @@ const portalInternalJsonParser = express.json({
 });
 
 const noncesPortal = new Map();
-function limparNoncesPortal(agora = Date.now()) {
-  for (const [nonce, expira] of noncesPortal.entries()) {
-    if (expira <= agora) noncesPortal.delete(nonce);
-  }
-  if (noncesPortal.size > 5000) {
-    const excedente = noncesPortal.size - 4000;
-    Array.from(noncesPortal.keys()).slice(0, excedente).forEach(chave => noncesPortal.delete(chave));
-  }
-}
-function segredoPortalInterno() {
-  try {
-    const buffer = Buffer.from(CONFIG.portalInternalHmacSecret, 'base64');
-    return buffer.length >= 32 ? buffer : null;
-  } catch (_) { return null; }
-}
+
 function assinaturaPortalValida(req) {
-  const secret = segredoPortalInterno();
-  if (!secret) return { ok:false, status:503, motivo:'segredo-nao-configurado' };
-  const timestamp = String(req.get('x-itr-timestamp') || '');
-  const nonce = String(req.get('x-itr-nonce') || '');
-  const signature = String(req.get('x-itr-signature') || '').toLowerCase();
-  if (!/^\d{10,13}$/.test(timestamp) || !/^[A-Za-z0-9_-]{16,128}$/.test(nonce) || !/^[a-f0-9]{64}$/.test(signature)) {
-    return { ok:false, status:401, motivo:'assinatura-invalida' };
-  }
-  const agoraSegundos = Math.floor(Date.now()/1000);
-  const ts = Number(timestamp);
-  if (!Number.isFinite(ts) || Math.abs(agoraSegundos-ts) > CONFIG.portalInternalMaxSkewSeconds) {
-    return { ok:false, status:401, motivo:'timestamp-invalido' };
-  }
-  limparNoncesPortal();
-  if (noncesPortal.has(nonce)) return { ok:false, status:409, motivo:'nonce-repetido' };
-  const raw = Buffer.isBuffer(req.portalRawBody) ? req.portalRawBody : Buffer.from('');
-  const expected = crypto.createHmac('sha256', secret).update(`${timestamp}.${nonce}.`, 'utf8').update(raw).digest('hex');
-  const recebido = Buffer.from(signature, 'utf8');
-  const esperado = Buffer.from(expected, 'utf8');
-  if (recebido.length !== esperado.length || !crypto.timingSafeEqual(recebido, esperado)) {
-    return { ok:false, status:401, motivo:'assinatura-invalida' };
-  }
-  noncesPortal.set(nonce, Date.now() + CONFIG.portalInternalMaxSkewSeconds*1000);
-  return { ok:true };
+  return validarAssinaturaPortal({
+    secretBase64: CONFIG.portalInternalHmacSecret,
+    timestamp: req.get('x-itr-timestamp'),
+    nonce: req.get('x-itr-nonce'),
+    signature: req.get('x-itr-signature'),
+    rawBody: Buffer.isBuffer(req.portalRawBody) ? req.portalRawBody : Buffer.from(''),
+    maxSkewSeconds: CONFIG.portalInternalMaxSkewSeconds,
+    nonceStore: noncesPortal,
+  });
 }
 
 // ============================================================
@@ -383,7 +356,7 @@ function extrairChaveManual(req) {
   const xApiKey = req.get('x-api-key');
 
   if (xApiKey) {
-    return xApiKey;
+    return String(xApiKey).trim();
   }
 
   const authorization = req.get('authorization');
@@ -397,14 +370,8 @@ function extrairChaveManual(req) {
       .trim();
   }
 
-  if (req.body?.chave) {
-    return String(req.body.chave);
-  }
-
-  if (req.query?.chave) {
-    return String(req.query.chave);
-  }
-
+  // Segredos nunca são aceitos por query string ou corpo.
+  // Isso evita vazamento em histórico, proxy, observabilidade e logs.
   return '';
 }
 
@@ -1076,75 +1043,40 @@ app.get('/', (req, res) => {
     .status(200)
     .json({
       ok: true,
-
-      servico:
-        'ITR Engenharia — E-mails e WhatsApp',
-
-      mensagem:
-        'Servidor funcionando.',
-
-      iniciadoEm:
-        estado.iniciadoEm,
-
-      timezone:
-        CONFIG.timezone,
-
-      cronAtivo:
-        CONFIG.cronAtivo,
-
-      cronHorario:
-        CONFIG.cronAtivo
-          ? CONFIG.cronHorario
-          : null,
-
-      execucaoEmAndamento:
-        existeExecucaoEmAndamento(),
-
-      webhook: {
-        configurado:
-          Boolean(
-            CONFIG.webhookVerifyToken
-          ),
-
-        validarAssinatura:
-          CONFIG.webhookValidarAssinatura,
-
-        rota:
-          CONFIG.webhookRota,
-      },
+      servico: 'ITR Engenharia — E-mails e WhatsApp',
+      health: '/health',
     });
 });
 
+function statusAutorizado(req) {
+  return Boolean(CONFIG.chaveDisparoManual) && requisicaoAutorizada(req);
+}
+
 app.head('/status', (req, res) => {
+  if (!statusAutorizado(req)) return res.status(401).end();
   return res.status(200).end();
 });
 
 app.get('/status', (req, res) => {
+  if (!statusAutorizado(req)) {
+    return res.status(401).json({
+      ok: false,
+      motivo: 'nao-autorizado',
+      mensagem: 'Autenticação obrigatória.',
+    });
+  }
+
   return res
     .status(200)
     .json({
       ok: true,
-
-      execucaoEmAndamento:
-        existeExecucaoEmAndamento(),
-
-      ultimaExecucaoIniciadaEm:
-        estado.ultimaExecucaoIniciadaEm,
-
-      ultimaExecucaoFinalizadaEm:
-        estado.ultimaExecucaoFinalizadaEm,
-
-      ultimaOrigem:
-        estado.ultimaOrigem,
-
-      ultimoResultado:
-        estado.ultimoResultado,
-
-      ultimoErro:
-        estado.ultimoErro,
-
-      webhook:
-        resumoSeguroWebhook(),
+      execucaoEmAndamento: existeExecucaoEmAndamento(),
+      ultimaExecucaoIniciadaEm: estado.ultimaExecucaoIniciadaEm,
+      ultimaExecucaoFinalizadaEm: estado.ultimaExecucaoFinalizadaEm,
+      ultimaOrigem: estado.ultimaOrigem,
+      ultimoResultado: estado.ultimoResultado,
+      ultimoErro: estado.ultimoErro,
+      webhook: resumoSeguroWebhook(),
     });
 });
 
@@ -1471,6 +1403,11 @@ function configurarServidorHttp(servidor) {
 function iniciarServidor() {
   if (servidorHttp) {
     return servidorHttp;
+  }
+
+  const validacao = exigirConfiguracaoValida(process.env);
+  for (const aviso of validacao.avisos) {
+    console.warn(`[Configuração] ${aviso}`);
   }
 
   tarefaCron =
