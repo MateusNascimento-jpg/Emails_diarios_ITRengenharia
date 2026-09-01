@@ -14,3 +14,4 @@ preview_email.html
 preview.png
 
 # IMPORTANTE: assets/logo.png e assets/logo-whatsapp.jpeg devem subir.
+*.bak
