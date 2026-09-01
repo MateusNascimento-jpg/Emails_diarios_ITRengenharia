@@ -10,6 +10,25 @@ function booleano(env, nome, padrao = false) {
   return ['1', 'true', 'sim', 'yes', 'on'].includes(valor.toLowerCase());
 }
 
+
+function placeholderEnv(valor) {
+  const v = String(valor ?? '').trim();
+  if (!v) return false;
+  return /^<[^>]+>$/.test(v) || /^(preencher|changeme|change_me|todo|tbd)$/i.test(v);
+}
+
+function contemMojibake(valor) {
+  const v = String(valor ?? '');
+  return /(?:Ã.|Â.|â€|ï¿½|�)/.test(v);
+}
+
+function segredoTextoForte(valor, minChars = 32) {
+  const v = String(valor ?? '').trim();
+  if (v.length < minChars) return false;
+  if (/^(.)\1+$/.test(v)) return false;
+  return true;
+}
+
 function emailValido(valor) {
   const v = String(valor || '').trim();
   return v.length > 0 && v.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
@@ -70,6 +89,28 @@ function validarConfiguracao(env = process.env, { estrito = true } = {}) {
   const permitirGetManual = booleano(env, 'PERMITIR_DISPARO_MANUAL_GET', false);
   const idempotenciaAtiva = booleano(env, 'IDEMPOTENCIA_ATIVA', false);
 
+  for (const [nome, valor] of Object.entries(env || {})) {
+    if (placeholderEnv(valor)) {
+      erros.push(`${nome} ainda contém placeholder; deixe vazio ou configure o valor real.`);
+    }
+  }
+
+  const nomesAirtableTextuais = Object.keys(env || {}).filter(nome =>
+    nome.startsWith('AIRTABLE_CAMPO_') || nome === 'AIRTABLE_STATUS_PERMITIDOS'
+  );
+  for (const nome of nomesAirtableTextuais) {
+    if (contemMojibake(env[nome])) {
+      erros.push(`${nome} contém texto com encoding corrompido (mojibake). Corrija o nome exatamente como existe no Airtable.`);
+    }
+  }
+
+  const chaveAdmin = texto(env, 'CHAVE_DISPARO_MANUAL');
+  if (!chaveAdmin) {
+    avisos.push('CHAVE_DISPARO_MANUAL está vazia; /status e /disparar-agora permanecerão inacessíveis.');
+  } else if (!segredoTextoForte(chaveAdmin, 32)) {
+    erros.push('CHAVE_DISPARO_MANUAL deve ter pelo menos 32 caracteres e ser aleatória.');
+  }
+
   const modoTesteEmail = texto(env, 'EMAIL_MODO_TESTE');
   if (modoTesteEmail && !emailValido(modoTesteEmail)) {
     erros.push('EMAIL_MODO_TESTE deve ficar vazio ou conter um e-mail válido. Não use false/true/0/1.');
@@ -124,6 +165,10 @@ function validarConfiguracao(env = process.env, { estrito = true } = {}) {
   }
   if (!texto(env, 'AIRTABLE_OS_TABLE_ID')) {
     avisos.push('AIRTABLE_OS_TABLE_ID não foi definido; a idempotência usará o ID padrão embutido. Prefira configurá-lo explicitamente em produção.');
+  }
+
+  if (whatsappAtivo && whatsappSimular) {
+    avisos.push('WHATSAPP_ATIVO=true com WHATSAPP_SIMULAR=true: o fluxo é exercitado, mas nenhuma mensagem real é enviada pela Meta.');
   }
 
   if (whatsappAtivo && !whatsappSimular) {
@@ -198,4 +243,7 @@ module.exports = {
   segredoBase64Valido,
   urlHttpsValida,
   dataHoraComFusoValida,
+  placeholderEnv,
+  contemMojibake,
+  segredoTextoForte,
 };

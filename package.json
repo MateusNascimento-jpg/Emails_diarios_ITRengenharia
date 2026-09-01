@@ -1,6 +1,6 @@
 {
   "name": "itr-emails-whatsapp",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "private": true,
   "description": "Automação ITR de e-mail/WhatsApp, incluindo notificações transacionais de segurança do Portal.",
   "main": "server.js",

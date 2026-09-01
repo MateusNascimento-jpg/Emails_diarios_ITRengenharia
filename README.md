@@ -9,7 +9,7 @@ Serviço Node.js da ITR Engenharia para:
 - manter proteção contra contatos de WhatsApp ambíguos/compartilhados;
 - oferecer idempotência persistente opcional no Airtable.
 
-Versão deste pacote: **2.1.1**.
+Versão deste pacote: **2.1.2**.
 
 ## Antes de iniciar
 
@@ -25,6 +25,12 @@ npm test
 ```
 
 O serviço também valida configuração crítica no startup.
+
+A 2.1.2 também bloqueia:
+
+- valores residuais como `<PREENCHER>`, `CHANGEME`, `TODO` e `TBD`;
+- nomes de campos do Airtable com sinais de encoding corrompido;
+- `CHAVE_DISPARO_MANUAL` fraca quando configurada.
 
 ### Regra importante: `EMAIL_MODO_TESTE`
 

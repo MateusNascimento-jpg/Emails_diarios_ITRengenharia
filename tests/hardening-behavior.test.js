@@ -48,6 +48,35 @@ test('EMAIL_MODO_TESTE rejeita false/true/texto e aceita vazio ou e-mail', () =>
 
 
 
+test('preflight rejeita placeholders, mojibake e chave administrativa fraca', () => {
+  const placeholder = validarConfiguracao({
+    ...envBase(),
+    AIRTABLE_FILTER_FORMULA: '<PREENCHER>',
+  });
+  assert.equal(placeholder.ok, false);
+  assert.match(placeholder.erros.join(' '), /placeholder/i);
+
+  const mojibake = validarConfiguracao({
+    ...envBase(),
+    AIRTABLE_CAMPO_OS_LINK: 'Ordem de ServiÃ§o',
+  });
+  assert.equal(mojibake.ok, false);
+  assert.match(mojibake.erros.join(' '), /encoding corrompido/i);
+
+  const chaveFraca = validarConfiguracao({
+    ...envBase(),
+    CHAVE_DISPARO_MANUAL: 'senha123',
+  });
+  assert.equal(chaveFraca.ok, false);
+  assert.match(chaveFraca.erros.join(' '), /CHAVE_DISPARO_MANUAL/);
+
+  const chaveForte = validarConfiguracao({
+    ...envBase(),
+    CHAVE_DISPARO_MANUAL: crypto.randomBytes(32).toString('base64'),
+  });
+  assert.equal(chaveForte.ok, true);
+});
+
 test('preflight bloqueia GET manual e exige marco temporal quando cron está ativo', () => {
   const getInseguro = validarConfiguracao({ ...envBase(), PERMITIR_DISPARO_MANUAL_GET: 'true' });
   assert.equal(getInseguro.ok, false);
