@@ -21,15 +21,17 @@
 //
 // UMA ORDEM DE SERVIÇO = UMA NOTIFICAÇÃO POR DESTINATÁRIO.
 //
-// Quando o cliente possui dois números válidos, a mesma OS gera
-// uma requisição independente para cada número. Todas as amostras,
-// ensaios e status continuam consolidados no mesmo payload.
+// Quando a OS cabe no template, cada destinatário recebe uma mensagem.
+// Quando a OS é grande, ela é dividida automaticamente em partes e cada
+// destinatário recebe TODAS as partes. Um destino com falha não impede
+// os demais destinos de continuarem sendo processados.
 // ============================================================
 
 require('dotenv').config();
 
 const {
   montarPayloadTemplateWhatsApp,
+  montarPayloadsTemplateWhatsApp,
 } = require('./whatsapp_template.js');
 
 // ============================================================
@@ -158,6 +160,12 @@ const CONFIG = Object.freeze({
       1500
     ),
 
+  pausaEntreMensagensMs:
+    numeroInteiroPositivo(
+      process.env.WHATSAPP_PAUSA_ENTRE_MENSAGENS_MS,
+      250
+    ),
+
   logPayload: booleanoEnv(
     'WHATSAPP_LOG_PAYLOAD',
     false
@@ -165,6 +173,11 @@ const CONFIG = Object.freeze({
 
   numerosBloqueados: textoEnv(
     'WHATSAPP_NUMEROS_BLOQUEADOS'
+  ),
+
+  bloqueioRigidoNumeros: booleanoEnv(
+    'WHATSAPP_BLOQUEIO_RIGIDO_NUMEROS',
+    false
   ),
 });
 
@@ -513,6 +526,17 @@ function obterNumerosBloqueados() {
 }
 
 function telefoneEstaBloqueado(
+  telefone
+) {
+  if (!CONFIG.bloqueioRigidoNumeros) {
+    return false;
+  }
+
+  return obterNumerosBloqueados()
+    .has(telefone);
+}
+
+function telefoneEstaListadoParaAuditoria(
   telefone
 ) {
   return obterNumerosBloqueados()
@@ -1497,10 +1521,8 @@ function prepararEnvioWhatsAppDaOS({
   if (!cliente) {
     return {
       ok: false,
-
       motivo:
         'cliente-ausente',
-
       mensagem:
         'O envio não recebeu o cliente.',
     };
@@ -1509,10 +1531,8 @@ function prepararEnvioWhatsAppDaOS({
   if (!ordem) {
     return {
       ok: false,
-
       motivo:
         'ordem-ausente',
-
       mensagem:
         'O envio não recebeu a Ordem de Serviço.',
     };
@@ -1526,16 +1546,12 @@ function prepararEnvioWhatsAppDaOS({
   if (!destinosResultado.ok) {
     return {
       ...destinosResultado,
-
       clienteId:
         cliente?.clienteId || '',
-
       clienteNome:
         cliente?.clienteNome || '',
-
       osId:
         ordem?.osId || '',
-
       osNome:
         ordem?.osNome ||
         ordem?.osId ||
@@ -1544,7 +1560,13 @@ function prepararEnvioWhatsAppDaOS({
   }
 
   const envios = [];
+  const destinosIgnorados = [];
+  const falhasPreparacao = [];
+  const telefonesMascarados = [];
   let referenciaResultado = null;
+  let quantidadePartes = 0;
+  let quantidadeItens = 0;
+  let indiceDestinoValido = 0;
 
   for (
     const destino
@@ -1555,86 +1577,154 @@ function prepararEnvioWhatsAppDaOS({
         destino.telefone
       )
     ) {
-      return {
-        ok: false,
-
-        motivo:
-          'numero-bloqueado',
-
-        mensagem:
-          'Um dos destinos está presente em ' +
-          'WHATSAPP_NUMEROS_BLOQUEADOS.',
-
+      destinosIgnorados.push({
         telefoneMascarado:
           mascararTelefone(
             destino.telefone
           ),
+        motivo:
+          'numero-bloqueado',
+      });
 
-        origemDestino:
-          destino.origem,
-
-        clienteId:
-          cliente?.clienteId || '',
-
-        clienteNome:
-          cliente?.clienteNome || '',
-
-        osId:
-          ordem?.osId || '',
-
-        osNome:
-          ordem?.osNome ||
-          ordem?.osId ||
-          '',
-      };
+      continue;
     }
 
-    const resultadoPayload =
-      montarPayloadTemplateWhatsApp({
+    const resultadoPayloads =
+      montarPayloadsTemplateWhatsApp({
         cliente,
         ordem,
-
         telefone:
           destino.telefone,
       });
 
-    if (!resultadoPayload.ok) {
-      return {
-        ...resultadoPayload,
-
+    if (!resultadoPayloads.ok) {
+      falhasPreparacao.push({
         telefoneMascarado:
           mascararTelefone(
             destino.telefone
           ),
+        motivo:
+          resultadoPayloads.motivo ||
+          'falha-preparacao',
+        mensagem:
+          resultadoPayloads.mensagem || '',
+      });
 
-        origemDestino:
-          destino.origem,
-      };
+      continue;
     }
+
+    indiceDestinoValido += 1;
 
     if (!referenciaResultado) {
       referenciaResultado =
-        resultadoPayload;
+        resultadoPayloads
+          .partes[0];
+
+      quantidadePartes =
+        resultadoPayloads
+          .quantidadePartes;
+
+      quantidadeItens =
+        resultadoPayloads
+          .quantidadeItens;
     }
 
-    envios.push({
-      payload:
-        resultadoPayload.payload,
+    const telefoneMascarado =
+      mascararTelefone(
+        destino.telefone
+      );
 
-      telefone:
-        destino.telefone,
+    telefonesMascarados.push(
+      telefoneMascarado
+    );
 
-      telefoneMascarado:
-        mascararTelefone(
-          destino.telefone
-        ),
+    for (
+      const parte
+      of resultadoPayloads.partes
+    ) {
+      envios.push({
+        payload:
+          parte.payload,
 
-      origemDestino:
-        destino.origem,
+        telefone:
+          destino.telefone,
 
-      telefoneOriginal:
-        destino.telefoneOriginal,
-    });
+        telefoneMascarado,
+
+        origemDestino:
+          destino.origem,
+
+        telefoneOriginal:
+          destino.telefoneOriginal,
+
+        indiceDestino:
+          indiceDestinoValido,
+
+        indiceParte:
+          parte.parteAtual || 1,
+
+        quantidadePartes:
+          parte.totalPartes ||
+          resultadoPayloads
+            .quantidadePartes || 1,
+
+        quantidadeItensParte:
+          parte.quantidadeItens || 0,
+
+        quantidadeItensTotal:
+          parte.quantidadeItensTotal ||
+          resultadoPayloads
+            .quantidadeItens || 0,
+
+        formatoDetalhes:
+          parte.formatoDetalhes,
+
+        tamanhoDetalhes:
+          parte.tamanhoDetalhes,
+
+        tamanhoCorpoEstimado:
+          parte.tamanhoCorpoEstimado,
+
+        limiteCorpo:
+          parte.limiteCorpo,
+
+        ordemServico:
+          parte.ordemServico,
+      });
+    }
+  }
+
+  if (envios.length === 0) {
+    const falha =
+      falhasPreparacao[0] ||
+      destinosIgnorados[0] || {
+        motivo:
+          'cliente-sem-whatsapp',
+        mensagem:
+          'Nenhum destino pôde ser preparado.',
+      };
+
+    return {
+      ok: false,
+      motivo:
+        falha.motivo ||
+        'falha-preparacao',
+      mensagem:
+        falha.mensagem ||
+        'Nenhum destino pôde ser preparado.',
+      destinosIgnorados,
+      falhasPreparacao,
+      clienteId:
+        cliente?.clienteId || '',
+      clienteNome:
+        cliente?.clienteNome || '',
+      osId:
+        ordem?.osId || '',
+      osNome:
+        ordem?.osNome ||
+        ordem?.osId ||
+        '',
+    };
   }
 
   const primeiroEnvio =
@@ -1648,14 +1738,27 @@ function prepararEnvioWhatsAppDaOS({
 
     envios,
 
-    quantidadeDestinos:
+    multipart:
+      quantidadePartes > 1,
+
+    quantidadePartes,
+
+    quantidadeMensagens:
       envios.length,
 
-    telefonesMascarados:
-      envios.map(
-        item =>
-          item.telefoneMascarado
-      ),
+    quantidadeDestinos:
+      indiceDestinoValido,
+
+    quantidadeDestinosIgnorados:
+      destinosIgnorados.length,
+
+    quantidadeFalhasPreparacao:
+      falhasPreparacao.length,
+
+    destinosIgnorados,
+    falhasPreparacao,
+
+    telefonesMascarados,
 
     payload:
       primeiroEnvio.payload,
@@ -1676,6 +1779,8 @@ function prepararEnvioWhatsAppDaOS({
       referencia.itens,
 
     quantidadeItens:
+      quantidadeItens ||
+      referencia.quantidadeItensTotal ||
       referencia.quantidadeItens,
 
     formatoDetalhes:
@@ -1731,28 +1836,16 @@ async function enviarWhatsAppDaOS({
 
     return {
       ok: true,
-
-      enviado:
-        false,
-
-      simulado:
-        false,
-
-      ignorado:
-        true,
-
-      motivo:
-        'whatsapp-desativado',
-
+      enviado: false,
+      simulado: false,
+      ignorado: true,
+      motivo: 'whatsapp-desativado',
       clienteId:
         cliente?.clienteId || '',
-
       clienteNome:
         cliente?.clienteNome || '',
-
       osId:
         ordem?.osId || '',
-
       osNome:
         identificacaoOs,
     };
@@ -1775,16 +1868,33 @@ async function enviarWhatsAppDaOS({
 
     return {
       ...preparado,
-
-      enviado:
-        false,
-
-      simulado:
-        false,
-
-      ignorado:
-        false,
+      enviado: false,
+      simulado: false,
+      ignorado: false,
     };
+  }
+
+  if (preparado.multipart) {
+    console.log(
+      `[WhatsApp] OS grande dividida automaticamente: ` +
+      `${preparado.clienteNome} | ` +
+      `${preparado.osNome} | ` +
+      `${preparado.quantidadeItens} item(ns) | ` +
+      `${preparado.quantidadePartes} parte(s) por destinatário | ` +
+      `${preparado.quantidadeDestinos} destinatário(s).`
+    );
+  }
+
+  if (
+    preparado.quantidadeDestinosIgnorados > 0 ||
+    preparado.quantidadeFalhasPreparacao > 0
+  ) {
+    console.warn(
+      `[WhatsApp] Preparação parcial: ` +
+      `${preparado.quantidadeDestinosIgnorados} destino(s) ignorado(s), ` +
+      `${preparado.quantidadeFalhasPreparacao} falha(s) de preparação. ` +
+      `Os demais continuarão.`
+    );
   }
 
   if (CONFIG.logPayload) {
@@ -1793,7 +1903,9 @@ async function enviarWhatsAppDaOS({
         console.log(
           `[WhatsApp] Payload preparado ` +
           `${indice + 1}/` +
-          `${preparado.quantidadeDestinos}:`,
+          `${preparado.quantidadeMensagens} ` +
+          `(destino ${envio.indiceDestino}/${preparado.quantidadeDestinos}, ` +
+          `parte ${envio.indiceParte}/${envio.quantidadePartes}):`,
 
           JSON.stringify(
             payloadSeguroParaLog(
@@ -1813,25 +1925,22 @@ async function enviarWhatsAppDaOS({
       `${preparado.clienteNome} | ` +
       `${preparado.osNome} | ` +
       `${preparado.quantidadeItens} item(ns) | ` +
-      `${preparado.quantidadeDestinos} destino(s): ` +
+      `${preparado.quantidadePartes} parte(s) | ` +
+      `${preparado.quantidadeDestinos} destino(s) | ` +
+      `${preparado.quantidadeMensagens} mensagem(ns): ` +
       `${preparado.telefonesMascarados.join(' | ')}`
     );
 
     return {
       ok: true,
-
-      enviado:
-        false,
-
-      simulado:
-        true,
-
-      ignorado:
-        false,
-
-      motivo:
-        'simulacao',
-
+      enviado: false,
+      simulado: true,
+      ignorado: false,
+      motivo: 'simulacao',
+      quantidadeEnviados: 0,
+      quantidadeFalhas: 0,
+      quantidadeMensagensEnviadas: 0,
+      quantidadeMensagensComFalha: 0,
       ...preparado,
     };
   }
@@ -1847,31 +1956,23 @@ async function enviarWhatsAppDaOS({
 
     return {
       ...configuracaoMeta,
-
-      enviado:
-        false,
-
-      simulado:
-        false,
-
-      ignorado:
-        false,
-
+      enviado: false,
+      simulado: false,
+      ignorado: false,
       clienteId:
         preparado.clienteId,
-
       clienteNome:
         preparado.clienteNome,
-
       osId:
         preparado.osId,
-
       osNome:
         preparado.osNome,
-
       quantidadeDestinos:
         preparado.quantidadeDestinos,
-
+      quantidadePartes:
+        preparado.quantidadePartes,
+      quantidadeMensagens:
+        preparado.quantidadeMensagens,
       telefonesMascarados:
         preparado.telefonesMascarados,
     };
@@ -1888,13 +1989,14 @@ async function enviarWhatsAppDaOS({
       preparado.envios[indice];
 
     console.log(
-      `[WhatsApp] Enviando ` +
-      `${indice + 1}/` +
-      `${preparado.quantidadeDestinos}: ` +
+      `[WhatsApp] Enviando mensagem ` +
+      `${indice + 1}/${preparado.quantidadeMensagens}: ` +
       `${preparado.clienteNome} | ` +
       `${preparado.osNome} | ` +
-      `${preparado.quantidadeItens} item(ns) | ` +
-      `destino ${envio.telefoneMascarado} | ` +
+      `destino ${envio.indiceDestino}/${preparado.quantidadeDestinos} ` +
+      `${envio.telefoneMascarado} | ` +
+      `parte ${envio.indiceParte}/${envio.quantidadePartes} | ` +
+      `${envio.quantidadeItensParte} item(ns) | ` +
       `Phone Number ID ` +
       `${mascararId(
         CONFIG.phoneNumberId
@@ -1920,12 +2022,12 @@ async function enviarWhatsAppDaOS({
         erroMeta.error_data?.details || '';
 
       console.error(
-        `[WhatsApp] Falha ` +
-        `${indice + 1}/` +
-        `${preparado.quantidadeDestinos}: ` +
+        `[WhatsApp] Falha mensagem ` +
+        `${indice + 1}/${preparado.quantidadeMensagens}: ` +
         `${preparado.clienteNome} | ` +
         `${preparado.osNome} | ` +
         `${envio.telefoneMascarado} | ` +
+        `parte ${envio.indiceParte}/${envio.quantidadePartes} | ` +
         `${respostaMeta.mensagem}`
       );
 
@@ -1939,243 +2041,266 @@ async function enviarWhatsAppDaOS({
       );
 
       resultados.push({
-        ok:
-          false,
-
-        enviado:
-          false,
-
+        ok: false,
+        enviado: false,
+        indiceDestino:
+          envio.indiceDestino,
+        indiceParte:
+          envio.indiceParte,
+        quantidadePartes:
+          envio.quantidadePartes,
         telefoneMascarado:
           envio.telefoneMascarado,
-
         origemDestino:
           envio.origemDestino,
-
-        motivo:
-          'erro-meta',
-
+        motivo: 'erro-meta',
         mensagem:
           respostaMeta.mensagem,
-
         statusHttp:
           respostaMeta.statusHttp,
-
         requestId:
           respostaMeta.requestId,
-
         tentativa:
           respostaMeta.tentativa,
-
         codigoMeta,
-
         subcodigoMeta,
-
         detalhesMeta,
-
         tipoErro:
-          respostaMeta.tipoErro ||
-          '',
+          respostaMeta.tipoErro || '',
       });
+    } else {
+      console.log(
+        `[WhatsApp] Enviado com sucesso mensagem ` +
+        `${indice + 1}/${preparado.quantidadeMensagens}: ` +
+        `${preparado.clienteNome} | ` +
+        `${preparado.osNome} | ` +
+        `${envio.telefoneMascarado} | ` +
+        `parte ${envio.indiceParte}/${envio.quantidadePartes} | ` +
+        `Message ID ` +
+        `${mascararId(
+          respostaMeta.messageId
+        )}`
+      );
 
-      continue;
+      resultados.push({
+        ok: true,
+        enviado: true,
+        indiceDestino:
+          envio.indiceDestino,
+        indiceParte:
+          envio.indiceParte,
+        quantidadePartes:
+          envio.quantidadePartes,
+        telefoneMascarado:
+          envio.telefoneMascarado,
+        origemDestino:
+          envio.origemDestino,
+        messageId:
+          respostaMeta.messageId,
+        statusHttp:
+          respostaMeta.statusHttp,
+        requestId:
+          respostaMeta.requestId,
+        tentativa:
+          respostaMeta.tentativa,
+      });
     }
 
-    console.log(
-      `[WhatsApp] Enviado com sucesso ` +
-      `${indice + 1}/` +
-      `${preparado.quantidadeDestinos}: ` +
-      `${preparado.clienteNome} | ` +
-      `${preparado.osNome} | ` +
-      `${envio.telefoneMascarado} | ` +
-      `Message ID ` +
-      `${mascararId(
-        respostaMeta.messageId
-      )}`
-    );
-
-    resultados.push({
-      ok:
-        true,
-
-      enviado:
-        true,
-
-      telefoneMascarado:
-        envio.telefoneMascarado,
-
-      origemDestino:
-        envio.origemDestino,
-
-      messageId:
-        respostaMeta.messageId,
-
-      statusHttp:
-        respostaMeta.statusHttp,
-
-      requestId:
-        respostaMeta.requestId,
-
-      tentativa:
-        respostaMeta.tentativa,
-    });
+    if (
+      indice < preparado.envios.length - 1 &&
+      CONFIG.pausaEntreMensagensMs > 0
+    ) {
+      await dormir(
+        CONFIG.pausaEntreMensagensMs
+      );
+    }
   }
 
-  const enviados =
+  const porDestino = new Map();
+
+  for (const resultado of resultados) {
+    if (!porDestino.has(resultado.indiceDestino)) {
+      porDestino.set(
+        resultado.indiceDestino,
+        {
+          indiceDestino:
+            resultado.indiceDestino,
+          telefoneMascarado:
+            resultado.telefoneMascarado,
+          total: 0,
+          enviados: 0,
+          falhas: 0,
+        }
+      );
+    }
+
+    const grupo =
+      porDestino.get(
+        resultado.indiceDestino
+      );
+
+    grupo.total += 1;
+
+    if (resultado.enviado) {
+      grupo.enviados += 1;
+    } else {
+      grupo.falhas += 1;
+    }
+  }
+
+  const destinosConcluidos =
+    [...porDestino.values()]
+      .filter(
+        item =>
+          item.total > 0 &&
+          item.falhas === 0
+      );
+
+  const destinosComFalha =
+    [...porDestino.values()]
+      .filter(
+        item =>
+          item.falhas > 0
+      );
+
+  const mensagensEnviadas =
     resultados.filter(
-      item =>
-        item.enviado === true
+      item => item.enviado === true
     );
 
-  const falhas =
+  const mensagensComFalha =
     resultados.filter(
-      item =>
-        item.ok === false
+      item => item.ok === false
     );
+
+  const houveQualquerEnvio =
+    mensagensEnviadas.length > 0;
+
+  const houveFalha =
+    destinosComFalha.length > 0 ||
+    preparado.quantidadeFalhasPreparacao > 0;
+
+  const parcial =
+    houveFalha &&
+    houveQualquerEnvio;
 
   const baseResultado = {
     clienteId:
       preparado.clienteId,
-
     clienteNome:
       preparado.clienteNome,
-
     osId:
       preparado.osId,
-
     osNome:
       preparado.osNome,
-
     quantidadeItens:
       preparado.quantidadeItens,
-
-    formatoDetalhes:
-      preparado.formatoDetalhes,
-
-    tamanhoDetalhes:
-      preparado.tamanhoDetalhes,
-
-    tamanhoCorpoEstimado:
-      preparado.tamanhoCorpoEstimado,
-
-    limiteCorpo:
-      preparado.limiteCorpo,
-
+    quantidadePartes:
+      preparado.quantidadePartes,
+    quantidadeMensagens:
+      preparado.quantidadeMensagens,
+    quantidadeMensagensEnviadas:
+      mensagensEnviadas.length,
+    quantidadeMensagensComFalha:
+      mensagensComFalha.length,
     quantidadeDestinos:
       preparado.quantidadeDestinos,
-
     quantidadeEnviados:
-      enviados.length,
-
+      destinosConcluidos.length,
     quantidadeFalhas:
-      falhas.length,
-
+      destinosComFalha.length +
+      preparado.quantidadeFalhasPreparacao,
+    quantidadeDestinosIgnorados:
+      preparado.quantidadeDestinosIgnorados,
+    quantidadeFalhasPreparacao:
+      preparado.quantidadeFalhasPreparacao,
     telefonesMascarados:
       preparado.telefonesMascarados,
-
+    destinosIgnorados:
+      preparado.destinosIgnorados,
+    falhasPreparacao:
+      preparado.falhasPreparacao,
+    destinosConcluidos,
+    destinosComFalha,
     messageIds:
-      enviados.map(
-        item =>
-          item.messageId
+      mensagensEnviadas.map(
+        item => item.messageId
       ),
-
     resultados,
   };
 
-  if (falhas.length > 0) {
+  if (houveFalha) {
     const primeiraFalha =
-      falhas[0];
+      mensagensComFalha[0] ||
+      preparado.falhasPreparacao[0] ||
+      {};
 
     return {
-      ok:
-        false,
+      ok: false,
 
+      // "enviado" representa destinatário completamente concluído.
+      // Envios parciais continuam marcados como parciais/incertos.
       enviado:
-        enviados.length > 0,
+        destinosConcluidos.length > 0,
 
-      simulado:
-        false,
-
-      ignorado:
-        false,
-
-      parcial:
-        enviados.length > 0,
+      simulado: false,
+      ignorado: false,
+      parcial,
 
       motivo:
-        enviados.length > 0
+        parcial
           ? 'erro-meta-parcial'
           : 'erro-meta',
 
       mensagem:
-        enviados.length > 0
-          ? (
-              `${enviados.length} de ` +
-              `${preparado.quantidadeDestinos} ` +
-              `destino(s) receberam a mensagem; ` +
-              `${falhas.length} falharam.`
-            )
-          : primeiraFalha.mensagem,
+        `${destinosConcluidos.length} de ` +
+        `${preparado.quantidadeDestinos} destinatário(s) ` +
+        `receberam todas as partes; ` +
+        `${destinosComFalha.length + preparado.quantidadeFalhasPreparacao} ` +
+        `destinatário(s) tiveram falha.`,
 
       statusHttp:
-        primeiraFalha.statusHttp,
-
+        primeiraFalha.statusHttp || 0,
       requestId:
-        primeiraFalha.requestId,
-
+        primeiraFalha.requestId || '',
       tentativa:
-        primeiraFalha.tentativa,
-
+        primeiraFalha.tentativa || 0,
       codigoMeta:
-        primeiraFalha.codigoMeta,
-
+        primeiraFalha.codigoMeta ?? null,
       subcodigoMeta:
-        primeiraFalha.subcodigoMeta,
-
+        primeiraFalha.subcodigoMeta ?? null,
       detalhesMeta:
-        primeiraFalha.detalhesMeta,
-
+        primeiraFalha.detalhesMeta || '',
       tipoErro:
-        primeiraFalha.tipoErro,
+        primeiraFalha.tipoErro || '',
 
       ...baseResultado,
     };
   }
 
   return {
-    ok:
-      true,
-
-    enviado:
-      true,
-
-    simulado:
-      false,
-
-    ignorado:
-      false,
-
-    parcial:
-      false,
-
-    motivo:
-      '',
+    ok: true,
+    enviado: true,
+    simulado: false,
+    ignorado: false,
+    parcial: false,
+    motivo: '',
 
     messageId:
-      enviados[0]?.messageId || '',
-
+      mensagensEnviadas[0]
+        ?.messageId || '',
     statusHttp:
-      enviados[0]?.statusHttp || 200,
-
+      mensagensEnviadas[0]
+        ?.statusHttp || 200,
     requestId:
-      enviados[0]?.requestId || '',
-
+      mensagensEnviadas[0]
+        ?.requestId || '',
     tentativa:
-      enviados[0]?.tentativa || 1,
-
+      mensagensEnviadas[0]
+        ?.tentativa || 1,
     telefoneMascarado:
       resultados[0]
         ?.telefoneMascarado || '',
-
     origemDestino:
       resultados[0]
         ?.origemDestino || '',
@@ -2201,6 +2326,7 @@ module.exports = {
   escolherTelefoneDestino,
 
   telefoneEstaBloqueado,
+  telefoneEstaListadoParaAuditoria,
   validarConfiguracaoMeta,
 
   CONFIG,

@@ -205,11 +205,18 @@ const CONTATOS_USAR_TODOS_REGISTROS =
     true
   );
 
-// Quando o mesmo telefone aparece em clientes diferentes, o
-// WhatsApp fica bloqueado automaticamente.
-const BLOQUEAR_WHATSAPP_COMPARTILHADO =
+// Regra operacional 2.2.1: o mesmo telefone pode pertencer a mais
+// de um cliente. Isso é auditado e logado, mas não bloqueia o envio.
+// A variável legada AIRTABLE_BLOQUEAR_WHATSAPP_COMPARTILHADO é
+// intencionalmente ignorada para manter este comportamento determinístico.
+const BLOQUEAR_WHATSAPP_COMPARTILHADO = false;
+
+// WHATSAPP_NUMEROS_BLOQUEADOS passa a ser uma lista de auditoria por
+// padrão. Só vira bloqueio real quando esta flag nova é explicitamente true.
+// Isso evita que uma denylist antiga/sobrando impeça contatos legítimos.
+const BLOQUEIO_RIGIDO_NUMEROS =
   booleanoEnv(
-    'AIRTABLE_BLOQUEAR_WHATSAPP_COMPARTILHADO',
+    'WHATSAPP_BLOQUEIO_RIGIDO_NUMEROS',
     false
   );
 
@@ -497,26 +504,65 @@ function separarEmailsDetalhado(valor) {
   const formatoBasico =
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+  const regexEmail =
+    /[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+
   const vistos = new Set();
   const validos = [];
   const invalidos = [];
 
-  for (
-    const item of listaSeparada(valor)
-  ) {
-    const chave = item.toLowerCase();
+  const fontes =
+    Array.isArray(valor)
+      ? valor.flat(Infinity)
+      : [valor];
 
-    if (!formatoBasico.test(item)) {
-      invalidos.push(item);
+  for (const fonte of fontes) {
+    const textoFonte =
+      String(fonte ?? '').trim();
+
+    if (!textoFonte) {
       continue;
     }
 
-    if (vistos.has(chave)) {
-      continue;
-    }
+    const extraidos =
+      textoFonte.match(regexEmail) || [];
 
-    vistos.add(chave);
-    validos.push(item);
+    // Quando há e-mails reconhecíveis, prioriza a extração tolerante.
+    // Isso suporta "Nome <email>", espaços, vírgulas, barras, pipes,
+    // ponto e vírgula e quebras de linha sem perder destinatários.
+    const candidatos =
+      extraidos.length > 0
+        ? extraidos
+        : listaSeparada(textoFonte)
+            .flatMap(item =>
+              String(item)
+                .split(/\s+/)
+            )
+            .map(item => item.trim())
+            .filter(Boolean);
+
+    for (const candidato of candidatos) {
+      const item =
+        String(candidato ?? '').trim();
+
+      if (!item) {
+        continue;
+      }
+
+      const chave = item.toLowerCase();
+
+      if (!formatoBasico.test(item)) {
+        invalidos.push(item);
+        continue;
+      }
+
+      if (vistos.has(chave)) {
+        continue;
+      }
+
+      vistos.add(chave);
+      validos.push(item);
+    }
   }
 
   return {
@@ -1583,15 +1629,22 @@ function analisarWhatsappDoCliente({
     }
   }
 
-  const numerosBloqueados =
+  const numerosListados =
     numeros.filter(numero =>
       NUMEROS_BLOQUEADOS.has(numero)
     );
 
+  const numerosBloqueados =
+    BLOQUEIO_RIGIDO_NUMEROS
+      ? numerosListados
+      : [];
+
   const numerosPermitidos =
-    numeros.filter(numero =>
-      !NUMEROS_BLOQUEADOS.has(numero)
-    );
+    BLOQUEIO_RIGIDO_NUMEROS
+      ? numeros.filter(numero =>
+          !NUMEROS_BLOQUEADOS.has(numero)
+        )
+      : [...numeros];
 
   const originaisPermitidos =
     numerosPermitidos.map(numero =>
@@ -1670,6 +1723,12 @@ function analisarWhatsappDoCliente({
     whatsappBloqueado:
       numerosBloqueados.length > 0,
 
+    whatsappNumerosListadosAuditoria:
+      numerosListados.length > 0,
+
+    whatsappBloqueioRigidoNumeros:
+      BLOQUEIO_RIGIDO_NUMEROS,
+
     whatsappTodosBloqueados:
       todosBloqueados,
 
@@ -1690,6 +1749,11 @@ function analisarWhatsappDoCliente({
 
     whatsappsBloqueadosMascarados:
       numerosBloqueados.map(
+        mascararTelefone
+      ),
+
+    whatsappsListadosAuditoriaMascarados:
+      numerosListados.map(
         mascararTelefone
       ),
   };
@@ -1754,8 +1818,19 @@ function registrarAvisosCliente(
     console.warn(
       `[Airtable/WhatsApp] ` +
       `${clienteFinal.clienteNome}: ` +
-      `o telefone está na lista de bloqueados ` +
+      `bloqueio rígido ativo para número(s) da lista ` +
       `(${clienteFinal.whatsappsBloqueadosMascarados.join(' | ')}).`
+    );
+  } else if (
+    clienteFinal.whatsappNumerosListadosAuditoria
+  ) {
+    console.warn(
+      `[Airtable/WhatsApp] ` +
+      `${clienteFinal.clienteNome}: ` +
+      `número(s) presente(s) em WHATSAPP_NUMEROS_BLOQUEADOS ` +
+      `foram mantidos para envio porque ` +
+      `WHATSAPP_BLOQUEIO_RIGIDO_NUMEROS=false ` +
+      `(${clienteFinal.whatsappsListadosAuditoriaMascarados.join(' | ')}).`
     );
   }
 
@@ -2319,8 +2394,14 @@ function agruparPorClienteEOSDetalhado(
         CONTATOS_USAR_TODOS_REGISTROS,
       bloquearWhatsappCompartilhado:
         BLOQUEAR_WHATSAPP_COMPARTILHADO,
-      quantidadeNumerosBloqueados:
+      bloqueioRigidoNumeros:
+        BLOQUEIO_RIGIDO_NUMEROS,
+      quantidadeNumerosListados:
         NUMEROS_BLOQUEADOS.size,
+      quantidadeNumerosBloqueados:
+        BLOQUEIO_RIGIDO_NUMEROS
+          ? NUMEROS_BLOQUEADOS.size
+          : 0,
     },
   };
 }
@@ -2471,8 +2552,16 @@ module.exports = {
     bloquearWhatsappCompartilhado:
       BLOQUEAR_WHATSAPP_COMPARTILHADO,
 
-    quantidadeNumerosBloqueados:
+    bloqueioRigidoNumeros:
+      BLOQUEIO_RIGIDO_NUMEROS,
+
+    quantidadeNumerosListados:
       NUMEROS_BLOQUEADOS.size,
+
+    quantidadeNumerosBloqueados:
+      BLOQUEIO_RIGIDO_NUMEROS
+        ? NUMEROS_BLOQUEADOS.size
+        : 0,
 
     pageSize: AIRTABLE_PAGE_SIZE,
     maxPaginas: AIRTABLE_MAX_PAGINAS,

@@ -133,6 +133,8 @@ process.env.AIRTABLE_CAMPO_DATA_ATUALIZACAO =
 // Número fictício usado apenas no teste local.
 process.env.WHATSAPP_NUMEROS_BLOQUEADOS =
   '5561999998450';
+process.env.WHATSAPP_BLOQUEIO_RIGIDO_NUMEROS =
+  'true';
 
 const assert =
   require('node:assert/strict');
@@ -1451,7 +1453,7 @@ function executar() {
   );
 
   console.log(
-    'NÚMEROS PROIBIDOS: BLOQUEADOS'
+    'WHATSAPP_NUMEROS_BLOQUEADOS: AUDITORIA POR PADRÃO; BLOQUEIO SOMENTE COM WHATSAPP_BLOQUEIO_RIGIDO_NUMEROS=true'
   );
 }
 

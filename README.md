@@ -9,7 +9,7 @@ Serviço Node.js da ITR Engenharia para:
 - auditar números de WhatsApp compartilhados sem bloquear por padrão;
 - oferecer idempotência persistente opcional no Airtable.
 
-Versão deste pacote: **2.2.0**.
+Versão deste pacote: **2.2.1**.
 
 ## Antes de iniciar
 
@@ -26,22 +26,25 @@ npm test
 
 O serviço também valida configuração crítica no startup.
 
-A 2.2.0 mantém os bloqueios de segurança de configuração e adiciona as regras abaixo.
+A 2.2.1 mantém as regras da 2.2.0 e adiciona entrega resiliente para listas grandes de WhatsApp e contatos heterogêneos.
 
-### Regras 2.2.0 — contatos e destinatários
+### Regras 2.2.1 — contatos, destinatários e mensagens grandes
 
 - cada telefone válido é processado independentemente;
 - um telefone inválido/bloqueado não derruba os demais números válidos do cliente;
-- números compartilhados entre clientes geram aviso de auditoria e são permitidos por padrão;
-- para voltar ao bloqueio rígido, use `AIRTABLE_BLOQUEAR_WHATSAPP_COMPARTILHADO=true`;
+- números compartilhados entre clientes geram aviso de auditoria e são permitidos; o mesmo número pode receber notificações de clientes diferentes quando estiver cadastrado nos dois;
 - são aceitos formatos comuns com `+55`, `0055`, `0 + DDD`, parênteses, espaços e hífens;
 - `;`, `,`, `|`, `/` e quebra de linha podem separar múltiplos telefones;
+- OS grandes que excedem o limite de um único template são divididas automaticamente em partes, sem descartar os itens;
+- cada telefone recebe todas as partes da OS; uma falha em um destino não impede as tentativas dos demais;
+- `WHATSAPP_NUMEROS_BLOQUEADOS` funciona como lista de auditoria por padrão; para torná-la bloqueio efetivo, configure `WHATSAPP_BLOQUEIO_RIGIDO_NUMEROS=true`;
+- `WHATSAPP_PAUSA_ENTRE_MENSAGENS_MS` controla a pausa curta entre partes/destinatários, sem alterar o cron;
 - cada e-mail cadastrado recebe uma mensagem individual, sem expor os outros destinatários;
 - o primeiro e-mail consolidado do Airtable é o contato principal e é o único que recebe a senha inicial legada;
 - destinatários secundários recebem a mesma atualização do cliente, mas sem a senha inicial do contato principal;
 - falhas finais da Meta recebidas pelo webhook ficam detalhadas nos logs e nas falhas recentes do `/status`.
 
-A 2.2.0 também bloqueia:
+A 2.2.1 também mantém os bloqueios de configuração crítica:
 
 - valores residuais como `<PREENCHER>`, `CHANGEME`, `TODO` e `TBD`;
 - nomes de campos do Airtable com sinais de encoding corrompido;

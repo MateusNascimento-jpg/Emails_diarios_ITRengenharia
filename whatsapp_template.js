@@ -752,14 +752,163 @@ function escolherDetalhes(
     : compacto;
 }
 
+function ordemServicoDaParte(
+  ordemServico,
+  parteAtual,
+  totalPartes
+) {
+  const base = limparTexto(
+    ordemServico,
+    '-'
+  );
+
+  if (
+    !Number.isInteger(totalPartes) ||
+    totalPartes <= 1
+  ) {
+    return base;
+  }
+
+  return (
+    `${base} ` +
+    `(parte ${parteAtual}/${totalPartes})`
+  );
+}
+
+function detalhesCabem(resultado) {
+  return Boolean(
+    resultado?.cabeNoLimiteDetalhes &&
+    resultado?.cabeNoLimiteCorpo
+  );
+}
+
+function maximoDetalhesParaOrdem(
+  ordemServico
+) {
+  const disponivelNoCorpo =
+    limiteEfetivoCorpo() -
+    CONFIG.templateBodyFixedChars -
+    contarCaracteres(
+      normalizarParametroMeta(
+        ordemServico
+      )
+    );
+
+  return Math.max(
+    1,
+    Math.min(
+      CONFIG.detailsMaxChars,
+      disponivelNoCorpo
+    )
+  );
+}
+
+function quebrarTextoSeguro(
+  valor,
+  limite
+) {
+  const texto =
+    normalizarParametroMeta(
+      valor
+    );
+
+  const maximo = Math.max(
+    1,
+    Number.parseInt(
+      String(limite || 1),
+      10
+    ) || 1
+  );
+
+  if (
+    contarCaracteres(texto) <=
+    maximo
+  ) {
+    return [texto];
+  }
+
+  const partes = [];
+  let restante = texto;
+
+  while (
+    contarCaracteres(restante) >
+    maximo
+  ) {
+    const caracteres =
+      Array.from(restante);
+
+    const janela = caracteres
+      .slice(0, maximo + 1)
+      .join('');
+
+    let corte = -1;
+
+    // Prioriza separadores sem quebrar palavras/identificadores.
+    for (const separador of [
+      ' • ',
+      '; ',
+      ', ',
+      ' ',
+    ]) {
+      const indice =
+        janela.lastIndexOf(
+          separador,
+          maximo
+        );
+
+      if (
+        indice >= Math.floor(
+          maximo * 0.55
+        )
+      ) {
+        corte =
+          indice +
+          separador.length;
+        break;
+      }
+    }
+
+    if (corte <= 0) {
+      corte = maximo;
+    }
+
+    const parte =
+      Array.from(restante)
+        .slice(0, corte)
+        .join('')
+        .trim();
+
+    if (!parte) {
+      break;
+    }
+
+    partes.push(parte);
+
+    restante =
+      Array.from(restante)
+        .slice(corte)
+        .join('')
+        .trim();
+  }
+
+  if (restante) {
+    partes.push(restante);
+  }
+
+  return partes.filter(Boolean);
+}
+
 function montarVariaveisDaOS(
   cliente,
-  ordem
+  ordem,
+  opcoes = {}
 ) {
   const itens =
-    itensDaOS(
-      ordem
-    );
+    Array.isArray(opcoes.itens)
+      ? opcoes.itens
+      : itensDaOS(
+          ordem
+        );
 
   if (itens.length === 0) {
     return {
@@ -777,14 +926,22 @@ function montarVariaveisDaOS(
     };
   }
 
-  const ordemServico =
+  const ordemServicoBase =
     limparTexto(
       ordem?.osNome ||
         ordem?.osId,
       '-'
     );
 
+  const ordemServico =
+    limparTexto(
+      opcoes.ordemServico ||
+        ordemServicoBase,
+      '-'
+    );
+
   const detalhesResultado =
+    opcoes.detalhesResultado ||
     escolherDetalhes(
       itens,
       ordemServico
@@ -802,10 +959,9 @@ function montarVariaveisDaOS(
   }
 
   if (
-    !detalhesResultado
-      .cabeNoLimiteDetalhes ||
-    !detalhesResultado
-      .cabeNoLimiteCorpo
+    !detalhesCabem(
+      detalhesResultado
+    )
   ) {
     return {
       ok:
@@ -852,6 +1008,40 @@ function montarVariaveisDaOS(
       '-'
     );
 
+  const emailsCliente =
+    Array.isArray(cliente?.emails)
+      ? cliente.emails
+      : [];
+
+  const emailAcesso =
+    limparTexto(
+      cliente?.emailPrincipal ||
+        emailsCliente[0] ||
+        cliente?.email,
+      '-'
+    );
+
+  const quantidadeItensTotal =
+    Number.isInteger(
+      opcoes.quantidadeItensTotal
+    )
+      ? opcoes.quantidadeItensTotal
+      : itens.length;
+
+  const parteAtual =
+    Number.isInteger(
+      opcoes.parteAtual
+    )
+      ? opcoes.parteAtual
+      : 1;
+
+  const totalPartes =
+    Number.isInteger(
+      opcoes.totalPartes
+    )
+      ? opcoes.totalPartes
+      : 1;
+
   const contexto =
     Object.freeze({
       ordem_servico:
@@ -859,6 +1049,9 @@ function montarVariaveisDaOS(
 
       os:
         ordemServico,
+
+      os_original:
+        ordemServicoBase,
 
       os_id:
         limparTexto(
@@ -923,21 +1116,26 @@ function montarVariaveisDaOS(
         ),
 
       senha_inicial:
-        limparTexto(
-          cliente?.email,
-          '-'
-        ),
+        emailAcesso,
 
       email_acesso:
-        limparTexto(
-          cliente?.email,
-          '-'
-        ),
+        emailAcesso,
 
       quantidade_itens:
         String(
           itens.length
         ),
+
+      quantidade_itens_total:
+        String(
+          quantidadeItensTotal
+        ),
+
+      parte_atual:
+        String(parteAtual),
+
+      total_partes:
+        String(totalPartes),
 
       portal_url:
         textoEnv(
@@ -961,6 +1159,14 @@ function montarVariaveisDaOS(
     quantidadeItens:
       itens.length,
 
+    quantidadeItensTotal,
+
+    parteAtual,
+
+    totalPartes,
+
+    ordemServico,
+
     tamanhoDetalhes:
       detalhesResultado
         .tamanhoDetalhes,
@@ -972,6 +1178,253 @@ function montarVariaveisDaOS(
     limiteCorpo:
       detalhesResultado
         .limiteCorpo,
+  };
+}
+
+function montarVariaveisDaOSPartes(
+  cliente,
+  ordem
+) {
+  const itens =
+    itensDaOS(
+      ordem
+    );
+
+  if (itens.length === 0) {
+    return {
+      ok: false,
+      motivo: 'os-sem-itens-validos',
+      clienteId:
+        cliente?.clienteId || '',
+      osId:
+        ordem?.osId || '',
+    };
+  }
+
+  const ordemServicoBase =
+    limparTexto(
+      ordem?.osNome ||
+        ordem?.osId,
+      '-'
+    );
+
+  const completo =
+    escolherDetalhes(
+      itens,
+      ordemServicoBase
+    );
+
+  if (detalhesCabem(completo)) {
+    const variaveis =
+      montarVariaveisDaOS(
+        cliente,
+        ordem,
+        {
+          itens,
+          ordemServico:
+            ordemServicoBase,
+          detalhesResultado:
+            completo,
+          parteAtual: 1,
+          totalPartes: 1,
+          quantidadeItensTotal:
+            itens.length,
+        }
+      );
+
+    return {
+      ok: variaveis.ok,
+      motivo: variaveis.motivo || '',
+      partes:
+        variaveis.ok
+          ? [variaveis]
+          : [],
+      quantidadePartes:
+        variaveis.ok ? 1 : 0,
+      quantidadeItens:
+        itens.length,
+    };
+  }
+
+  // Usa um sufixo conservador para reservar espaço para "parte X/Y"
+  // antes de sabermos quantas partes existirão de fato.
+  const ordemParaCalculo =
+    ordemServicoDaParte(
+      ordemServicoBase,
+      9999,
+      9999
+    );
+
+  const grupos = [];
+  let atual = [];
+
+  const adicionarItemIsolado = item => {
+    const teste =
+      escolherDetalhes(
+        [item],
+        ordemParaCalculo
+      );
+
+    if (detalhesCabem(teste)) {
+      atual = [item];
+      return;
+    }
+
+    // Caso extremo: um único item excede o parâmetro. Em vez de
+    // descartar a OS, divide o texto desse item sem perder conteúdo.
+    const textoItem =
+      normalizarParametroMeta(
+        detalhesEmBlocos(
+          [item]
+        )
+      );
+
+    const limiteFragmento =
+      maximoDetalhesParaOrdem(
+        ordemParaCalculo
+      );
+
+    const fragmentos =
+      quebrarTextoSeguro(
+        textoItem,
+        limiteFragmento
+      );
+
+    for (const fragmento of fragmentos) {
+      grupos.push({
+        itens: [item],
+        textoForcado:
+          fragmento,
+        formatoForcado:
+          'fragmento',
+      });
+    }
+  };
+
+  for (const item of itens) {
+    const candidato = [
+      ...atual,
+      item,
+    ];
+
+    const teste =
+      escolherDetalhes(
+        candidato,
+        ordemParaCalculo
+      );
+
+    if (detalhesCabem(teste)) {
+      atual = candidato;
+      continue;
+    }
+
+    if (atual.length > 0) {
+      grupos.push({
+        itens: atual,
+      });
+      atual = [];
+    }
+
+    adicionarItemIsolado(item);
+  }
+
+  if (atual.length > 0) {
+    grupos.push({
+      itens: atual,
+    });
+  }
+
+  const totalPartes =
+    grupos.length;
+
+  const partes = [];
+
+  for (
+    let indice = 0;
+    indice < grupos.length;
+    indice += 1
+  ) {
+    const grupo =
+      grupos[indice];
+
+    const parteAtual =
+      indice + 1;
+
+    const ordemServico =
+      ordemServicoDaParte(
+        ordemServicoBase,
+        parteAtual,
+        totalPartes
+      );
+
+    const detalhesResultado =
+      grupo.textoForcado
+        ? candidatoDetalhes({
+            formato:
+              grupo.formatoForcado ||
+              'fragmento',
+            texto:
+              grupo.textoForcado,
+            ordemServico,
+          })
+        : escolherDetalhes(
+            grupo.itens,
+            ordemServico
+          );
+
+    if (!detalhesCabem(detalhesResultado)) {
+      return {
+        ok: false,
+        motivo:
+          'detalhes-excedem-limite-apos-divisao',
+        mensagem:
+          `A parte ${parteAtual}/${totalPartes} ainda excede o limite do template.`,
+        quantidadeItens:
+          itens.length,
+        quantidadePartes:
+          totalPartes,
+        clienteId:
+          cliente?.clienteId || '',
+        osId:
+          ordem?.osId || '',
+      };
+    }
+
+    const variaveis =
+      montarVariaveisDaOS(
+        cliente,
+        ordem,
+        {
+          itens:
+            grupo.itens,
+          ordemServico,
+          detalhesResultado,
+          parteAtual,
+          totalPartes,
+          quantidadeItensTotal:
+            itens.length,
+        }
+      );
+
+    if (!variaveis.ok) {
+      return variaveis;
+    }
+
+    partes.push(
+      variaveis
+    );
+  }
+
+  return {
+    ok: true,
+    motivo: '',
+    partes,
+    quantidadePartes:
+      partes.length,
+    quantidadeItens:
+      itens.length,
+    ordemServico:
+      ordemServicoBase,
   };
 }
 
@@ -1334,11 +1787,7 @@ function montarComponentesBotoes(
     );
 }
 
-function montarPayloadTemplateWhatsApp({
-  cliente,
-  ordem,
-  telefone,
-}) {
+function validarConfiguracaoTemplateBasica() {
   const templateName =
     limparTexto(
       CONFIG.templateName
@@ -1351,12 +1800,9 @@ function montarPayloadTemplateWhatsApp({
 
   if (!templateName) {
     return {
-      ok:
-        false,
-
+      ok: false,
       motivo:
         'template-nao-configurado',
-
       mensagem:
         'Preencha WHATSAPP_TEMPLATE_NAME.',
     };
@@ -1364,15 +1810,155 @@ function montarPayloadTemplateWhatsApp({
 
   if (!templateLanguage) {
     return {
-      ok:
-        false,
-
+      ok: false,
       motivo:
         'idioma-template-nao-configurado',
-
       mensagem:
         'Preencha WHATSAPP_TEMPLATE_LANGUAGE.',
     };
+  }
+
+  return {
+    ok: true,
+    templateName,
+    templateLanguage,
+  };
+}
+
+function montarPayloadComVariaveis({
+  cliente,
+  ordem,
+  telefone,
+  variaveis,
+  templateName,
+  templateLanguage,
+}) {
+  const components = [];
+
+  const cabecalho =
+    montarComponenteCabecalho(
+      variaveis.contexto
+    );
+
+  if (cabecalho) {
+    components.push(
+      cabecalho
+    );
+  }
+
+  components.push({
+    type:
+      'body',
+
+    parameters:
+      montarParametrosDoCorpo(
+        variaveis.contexto
+      ),
+  });
+
+  components.push(
+    ...montarComponentesBotoes(
+      variaveis.contexto
+    )
+  );
+
+  const payload = {
+    messaging_product:
+      'whatsapp',
+
+    recipient_type:
+      'individual',
+
+    to:
+      telefone,
+
+    type:
+      'template',
+
+    template: {
+      name:
+        templateName,
+
+      language: {
+        code:
+          templateLanguage,
+      },
+
+      components,
+    },
+  };
+
+  validarPayloadTemplateMeta(
+    payload
+  );
+
+  return {
+    ok: true,
+    payload,
+
+    contexto:
+      variaveis.contexto,
+
+    itens:
+      variaveis.itens,
+
+    quantidadeItens:
+      variaveis.quantidadeItens,
+
+    quantidadeItensTotal:
+      variaveis.quantidadeItensTotal ||
+      variaveis.quantidadeItens,
+
+    parteAtual:
+      variaveis.parteAtual || 1,
+
+    totalPartes:
+      variaveis.totalPartes || 1,
+
+    ordemServico:
+      variaveis.ordemServico ||
+      ordem?.osNome ||
+      ordem?.osId ||
+      '',
+
+    formatoDetalhes:
+      variaveis.formatoDetalhes,
+
+    tamanhoDetalhes:
+      variaveis.tamanhoDetalhes,
+
+    tamanhoCorpoEstimado:
+      variaveis.tamanhoCorpoEstimado,
+
+    limiteCorpo:
+      variaveis.limiteCorpo,
+
+    clienteId:
+      cliente?.clienteId || '',
+
+    clienteNome:
+      cliente?.clienteNome || '',
+
+    osId:
+      ordem?.osId || '',
+
+    osNome:
+      ordem?.osNome ||
+      ordem?.osId ||
+      '',
+  };
+}
+
+function montarPayloadsTemplateWhatsApp({
+  cliente,
+  ordem,
+  telefone,
+}) {
+  const configuracao =
+    validarConfiguracaoTemplateBasica();
+
+  if (!configuracao.ok) {
+    return configuracao;
   }
 
   const telefoneFinal =
@@ -1383,131 +1969,60 @@ function montarPayloadTemplateWhatsApp({
 
   if (!telefoneFinal) {
     return {
-      ok:
-        false,
-
+      ok: false,
       motivo:
         'telefone-ausente',
-
       clienteId:
         cliente?.clienteId || '',
-
       osId:
         ordem?.osId || '',
     };
   }
 
   try {
-    const variaveis =
-      montarVariaveisDaOS(
+    const variaveisPartes =
+      montarVariaveisDaOSPartes(
         cliente,
         ordem
       );
 
-    if (!variaveis.ok) {
-      return variaveis;
+    if (!variaveisPartes.ok) {
+      return variaveisPartes;
     }
 
-    const components = [];
-
-    const cabecalho =
-      montarComponenteCabecalho(
-        variaveis.contexto
+    const partes =
+      variaveisPartes.partes.map(
+        variaveis =>
+          montarPayloadComVariaveis({
+            cliente,
+            ordem,
+            telefone:
+              telefoneFinal,
+            variaveis,
+            templateName:
+              configuracao.templateName,
+            templateLanguage:
+              configuracao.templateLanguage,
+          })
       );
-
-    if (cabecalho) {
-      components.push(
-        cabecalho
-      );
-    }
-
-    components.push({
-      type:
-        'body',
-
-      parameters:
-        montarParametrosDoCorpo(
-          variaveis.contexto
-        ),
-    });
-
-    components.push(
-      ...montarComponentesBotoes(
-        variaveis.contexto
-      )
-    );
-
-    const payload = {
-      messaging_product:
-        'whatsapp',
-
-      recipient_type:
-        'individual',
-
-      to:
-        telefoneFinal,
-
-      type:
-        'template',
-
-      template: {
-        name:
-          templateName,
-
-        language: {
-          code:
-            templateLanguage,
-        },
-
-        components,
-      },
-    };
-
-    validarPayloadTemplateMeta(
-      payload
-    );
 
     return {
-      ok:
-        true,
-
-      payload,
-
-      contexto:
-        variaveis.contexto,
-
-      itens:
-        variaveis.itens,
-
+      ok: true,
+      multipart:
+        partes.length > 1,
+      partes,
+      quantidadePartes:
+        partes.length,
       quantidadeItens:
-        variaveis
-          .quantidadeItens,
-
-      formatoDetalhes:
-        variaveis
-          .formatoDetalhes,
-
-      tamanhoDetalhes:
-        variaveis
-          .tamanhoDetalhes,
-
-      tamanhoCorpoEstimado:
-        variaveis
-          .tamanhoCorpoEstimado,
-
-      limiteCorpo:
-        variaveis
-          .limiteCorpo,
-
+        variaveisPartes.quantidadeItens,
+      telefone:
+        telefoneFinal,
       clienteId:
         cliente?.clienteId || '',
-
       clienteNome:
         cliente?.clienteNome || '',
-
       osId:
         ordem?.osId || '',
-
       osNome:
         ordem?.osNome ||
         ordem?.osId ||
@@ -1515,28 +2030,58 @@ function montarPayloadTemplateWhatsApp({
     };
   } catch (erro) {
     return {
-      ok:
-        false,
-
+      ok: false,
       motivo:
         'configuracao-template-invalida',
-
       mensagem:
         erro?.message ||
         String(erro),
-
       clienteId:
         cliente?.clienteId || '',
-
       osId:
         ordem?.osId || '',
     };
   }
 }
 
+function montarPayloadTemplateWhatsApp({
+  cliente,
+  ordem,
+  telefone,
+}) {
+  const multipart =
+    montarPayloadsTemplateWhatsApp({
+      cliente,
+      ordem,
+      telefone,
+    });
+
+  if (!multipart.ok) {
+    return multipart;
+  }
+
+  const primeira =
+    multipart.partes[0];
+
+  // Compatibilidade com integrações que historicamente esperam um
+  // único payload. Para OS grande, o chamador moderno deve usar
+  // montarPayloadsTemplateWhatsApp/prepararEnvioWhatsAppDaOS.
+  return {
+    ...primeira,
+    multipart:
+      multipart.multipart,
+    quantidadePartes:
+      multipart.quantidadePartes,
+    partes:
+      multipart.partes,
+  };
+}
+
 module.exports = {
   montarPayloadTemplateWhatsApp,
+  montarPayloadsTemplateWhatsApp,
   montarVariaveisDaOS,
+  montarVariaveisDaOSPartes,
 
   itensDaOS,
   detalhesEmBlocos,
@@ -1554,6 +2099,10 @@ module.exports = {
 
   contarCaracteres,
   estimarTamanhoCorpoFinal,
+  limiteEfetivoCorpo,
+  maximoDetalhesParaOrdem,
+  quebrarTextoSeguro,
+  ordemServicoDaParte,
 
   MARCADOR_ITEM,
   SEPARADOR_VISUAL_ITENS,

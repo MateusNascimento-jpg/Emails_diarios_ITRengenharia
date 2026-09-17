@@ -66,22 +66,48 @@ function emailValidoBasico(valor) {
 }
 
 function obterEmailsCliente(cliente) {
-  const fontes = Array.isArray(cliente?.emails) && cliente.emails.length > 0
-    ? cliente.emails
-    : [cliente?.email || ''];
+  // Consolida todas as fontes conhecidas. Isso evita perder um contato
+  // quando uma integração antiga preenche `email` e a nova preenche
+  // `emails`/`emailPrincipal` (ou vice-versa).
+  const fontes = [
+    cliente?.emailPrincipal || '',
+    ...(Array.isArray(cliente?.emails) ? cliente.emails.flat(Infinity) : []),
+    cliente?.email || '',
+  ];
 
   const vistos = new Set();
   const emails = [];
 
-  for (const fonte of fontes.flat(Infinity)) {
-    const partes = String(fonte || '')
-      .split(/[;,|\n\r]+/)
-      .map(item => item.trim())
-      .filter(Boolean);
+  for (const fonte of fontes) {
+    const texto = String(fonte || '').trim();
+    if (!texto) continue;
 
-    for (const email of partes) {
+    // Extrai endereços mesmo quando o Airtable recebe separadores variados
+    // (ponto e vírgula, vírgula, barra, pipe, quebra de linha ou espaço).
+    // O campo é destinado exclusivamente a contatos de e-mail, então a
+    // extração é mais tolerante sem inventar ou corrigir endereços inválidos.
+    const extraidos = texto.match(
+      /[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi
+    ) || [];
+
+    const candidatos = extraidos.length > 0
+      ? extraidos
+      : texto
+          .split(/[;,|/\n\r\s]+/)
+          .map(item => item.trim())
+          .filter(Boolean);
+
+    for (const candidato of candidatos) {
+      const email = String(candidato || '').trim();
       const chave = email.toLowerCase();
-      if (!emailValidoBasico(email) || vistos.has(chave)) continue;
+
+      if (
+        !emailValidoBasico(email) ||
+        vistos.has(chave)
+      ) {
+        continue;
+      }
+
       vistos.add(chave);
       emails.push(email);
     }
