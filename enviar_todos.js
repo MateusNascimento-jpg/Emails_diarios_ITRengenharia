@@ -9,7 +9,7 @@
 // 2. Aplica o filtro de data e status.
 // 3. Recebe os dados agrupados em:
 //      Cliente → Ordem de Serviço → Linhas.
-// 4. Gera um e-mail para cada OS.
+// 4. Gera um e-mail individual por destinatário de cada OS.
 // 5. Após o e-mail, gera a notificação de WhatsApp da OS.
 // 6. Todas as amostras, ensaios e status da mesma OS são
 //    incluídos no mesmo conteúdo.
@@ -20,7 +20,7 @@
 //
 // Regras:
 //
-// UMA ORDEM DE SERVIÇO = UM E-MAIL
+// UMA ORDEM DE SERVIÇO = UMA ATUALIZAÇÃO DE E-MAIL POR DESTINATÁRIO
 // UMA ORDEM DE SERVIÇO = UMA NOTIFICAÇÃO DE WHATSAPP
 // UMA NOTIFICAÇÃO = UMA MENSAGEM PARA CADA DESTINATÁRIO
 //
@@ -35,6 +35,7 @@ const {
 
 const {
   montarEmailDaOS,
+  montarEmailsIndividualizados,
 } = require('./email_template.js');
 
 const {
@@ -363,6 +364,9 @@ function criarResumoInicial() {
 
     email: {
       enviados: 0,
+      destinatariosEnviados: 0,
+      destinatariosComFalha: 0,
+      parciais: 0,
       falhas: 0,
       semDestino: 0,
       desativados: 0,
@@ -423,6 +427,15 @@ function registrarResultadoWhatsApp(
   resumo.whatsapp
     .destinatariosComFalha +=
       quantidadeFalhas;
+
+  if (resultado.parcial === true) {
+    if (resultado.enviado === true) {
+      resumo.whatsapp.enviados += 1;
+    }
+
+    resumo.whatsapp.falhas += 1;
+    return;
+  }
 
   if (
     resultado.enviado === true
@@ -527,28 +540,57 @@ async function processarEmailDaOS({
   let reserva = null;
 
   try {
-    const conteudo =
-      montarEmailDaOS(
+    let mensagens =
+      montarEmailsIndividualizados(
         cliente,
         ordem
       );
 
+    // Mantém o modo de teste útil mesmo quando o cliente não
+    // possui e-mail real: envia uma prévia única ao EMAIL_MODO_TESTE.
     if (
-      !conteudo ||
-      !conteudo.assunto ||
-      !conteudo.html ||
-      !conteudo.texto
+      mensagens.length === 0 &&
+      MODO_TESTE
     ) {
-      throw new Error(
-        'O template de e-mail retornou ' +
-        'conteúdo incompleto.'
-      );
+      mensagens = [
+        {
+          destinatario: '',
+          ehContatoPrincipal: true,
+          ...montarEmailDaOS(
+            cliente,
+            ordem,
+            {
+              destinatarioEmail: '',
+              ehContatoPrincipal: true,
+            }
+          ),
+        },
+      ];
     }
 
-    const destino =
-      destinoEmailDoCliente(
-        cliente
-      );
+    if (mensagens.length === 0) {
+      resumo.email.semDestino += 1;
+
+      return {
+        ok: false,
+        enviado: false,
+        ignorado: true,
+        motivo: 'sem-email',
+      };
+    }
+
+    for (const mensagem of mensagens) {
+      if (
+        !mensagem?.assunto ||
+        !mensagem?.html ||
+        !mensagem?.texto
+      ) {
+        throw new Error(
+          'O template de e-mail retornou ' +
+          'conteúdo incompleto.'
+        );
+      }
+    }
 
     if (idempotenciaAplicavelAoEmail()) {
       const hash = criarHashEnvio({
@@ -560,18 +602,24 @@ async function processarEmailDaOS({
         osId:
           ordem?.osId || '',
 
-        destino,
+        destino:
+          mensagens.map(
+            item => item.destinatario
+          ),
 
-        conteudo: {
-          assunto:
-            conteudo.assunto,
-
-          texto:
-            conteudo.texto,
-
-          html:
-            conteudo.html,
-        },
+        conteudo:
+          mensagens.map(item => ({
+            destinatario:
+              item.destinatario,
+            contatoPrincipal:
+              item.ehContatoPrincipal === true,
+            assunto:
+              item.assunto,
+            texto:
+              item.texto,
+            html:
+              item.html,
+          })),
       });
 
       const controle =
@@ -602,105 +650,199 @@ async function processarEmailDaOS({
         controle?.reserva || null;
     }
 
-    const resultado =
-      await enviar({
-        para:
-          destino,
+    const resultados = [];
 
-        assunto:
-          conteudo.assunto,
+    for (
+      let indice = 0;
+      indice < mensagens.length;
+      indice += 1
+    ) {
+      const mensagem =
+        mensagens[indice];
 
-        html:
-          conteudo.html,
+      try {
+        const resultado =
+          await enviar({
+            para:
+              mensagem.destinatario,
 
-        texto:
-          conteudo.texto,
-      });
+            assunto:
+              mensagem.assunto,
 
-    if (!resultado?.ok) {
-      await finalizarIdempotencia({
-        reserva,
-        estado:
-          'incerto',
+            html:
+              mensagem.html,
 
-        canal:
-          'email',
+            texto:
+              mensagem.texto,
+          });
 
-        clienteNome,
-        osNome,
-        resumo,
-      });
+        if (!resultado?.ok) {
+          console.error(
+            `  [E-MAIL FALHA ` +
+            `${indice + 1}/${mensagens.length}] ` +
+            `${clienteNome} / ${osNome}: ` +
+            `${resultado?.motivo || 'falha desconhecida'}`
+          );
 
-      resumo.email.falhas += 1;
+          resultados.push({
+            ok: false,
+            enviado: false,
+            motivo:
+              resultado?.motivo ||
+              'falha-email',
+            destinatario:
+              mensagem.destinatario,
+            contatoPrincipal:
+              mensagem.ehContatoPrincipal === true,
+          });
 
-      console.error(
-        `  [E-MAIL FALHA] ` +
-        `${clienteNome} / ${osNome}: ` +
-        `${resultado?.motivo || 'falha desconhecida'}`
+          continue;
+        }
+
+        const destinoLog =
+          mascararDestinos(
+            mensagem.destinatario ||
+            resultado.destino
+          ).join(', ');
+
+        console.log(
+          `  [E-MAIL OK ` +
+          `${indice + 1}/${mensagens.length}] ` +
+          `${clienteNome} / ${osNome}` +
+          `${destinoLog ? ` → ${destinoLog}` : ''}` +
+          `${mensagem.ehContatoPrincipal ? ' [contato principal]' : ''}`
+        );
+
+        resultados.push({
+          ok: true,
+          enviado: true,
+          id: resultado.id || '',
+          destinatario:
+            mensagem.destinatario,
+          destinoMascarado:
+            mascararDestinos(
+              mensagem.destinatario ||
+              resultado.destino
+            ),
+          contatoPrincipal:
+            mensagem.ehContatoPrincipal === true,
+        });
+      } catch (erro) {
+        console.error(
+          `  [E-MAIL ERRO ` +
+          `${indice + 1}/${mensagens.length}] ` +
+          `${clienteNome} / ${osNome}: ` +
+          `${erro?.message || erro}`
+        );
+
+        resultados.push({
+          ok: false,
+          enviado: false,
+          motivo: 'erro-email',
+          mensagem:
+            erro?.message ||
+            String(erro),
+          destinatario:
+            mensagem.destinatario,
+          contatoPrincipal:
+            mensagem.ehContatoPrincipal === true,
+        });
+      }
+    }
+
+    const enviados =
+      resultados.filter(
+        item => item.enviado === true
       );
 
-      return {
-        ok:
-          false,
+    const falhas =
+      resultados.filter(
+        item => item.ok === false
+      );
 
-        enviado:
-          false,
+    resumo.email.destinatariosEnviados +=
+      enviados.length;
 
-        ignorado:
-          false,
+    resumo.email.destinatariosComFalha +=
+      falhas.length;
 
-        motivo:
-          resultado?.motivo ||
-          'falha-email',
-      };
+    if (enviados.length > 0) {
+      resumo.email.enviados += 1;
     }
+
+    if (falhas.length > 0) {
+      resumo.email.falhas += 1;
+    }
+
+    const parcial =
+      enviados.length > 0 &&
+      falhas.length > 0;
+
+    if (parcial) {
+      resumo.email.parciais += 1;
+    }
+
+    const estadoIdempotencia =
+      falhas.length === 0
+        ? 'enviado'
+        : (
+            enviados.length > 0
+              ? 'incerto'
+              : 'falhou'
+          );
 
     const idempotencia =
       await finalizarIdempotencia({
         reserva,
-
         estado:
-          'enviado',
-
+          estadoIdempotencia,
         canal:
           'email',
-
         clienteNome,
         osNome,
         resumo,
       });
 
-    resumo.email.enviados += 1;
-
-    const destinoLog =
-      mascararDestinos(
-        resultado.destino
-      ).join(', ');
-
-    console.log(
-      `  [E-MAIL OK] ` +
-      `${clienteNome} / ${osNome}` +
-      `${destinoLog ? ` → ${destinoLog}` : ''}`
-    );
+    if (parcial) {
+      console.warn(
+        `  [E-MAIL PARCIAL] ` +
+        `${clienteNome} / ${osNome}: ` +
+        `${enviados.length} enviado(s), ` +
+        `${falhas.length} falha(s).`
+      );
+    }
 
     return {
       ok:
-        true,
+        falhas.length === 0,
 
       enviado:
-        true,
+        enviados.length > 0,
+
+      parcial,
 
       ignorado:
         false,
 
       motivo:
-        '',
+        falhas.length === 0
+          ? ''
+          : (
+              parcial
+                ? 'email-parcial'
+                : 'falha-email'
+            ),
 
-      id:
-        resultado.id || '',
+      quantidadeDestinos:
+        resultados.length,
 
-      destinoMascarado:
-        mascararDestinos(resultado.destino),
+      quantidadeEnviados:
+        enviados.length,
+
+      quantidadeFalhas:
+        falhas.length,
+
+      resultados,
 
       idempotenciaPersistida:
         idempotencia?.ok !== false,
@@ -894,7 +1036,10 @@ async function processarWhatsAppDaOS({
         ordem,
       });
 
-    if (resultado?.enviado === true) {
+    if (
+      resultado?.enviado === true &&
+      resultado?.parcial !== true
+    ) {
       resultado.idempotenciaPersistida =
         (
           await finalizarIdempotencia({
@@ -1258,12 +1403,27 @@ async function executarInternamente(
   );
 
   console.log(
-    `E-mails enviados: ` +
+    `OS com e-mail enviado: ` +
     `${resumo.email.enviados}`
   );
 
   console.log(
-    `E-mails com falha: ` +
+    `Destinatários de e-mail enviados: ` +
+    `${resumo.email.destinatariosEnviados}`
+  );
+
+  console.log(
+    `Destinatários de e-mail com falha: ` +
+    `${resumo.email.destinatariosComFalha}`
+  );
+
+  console.log(
+    `OS com envio de e-mail parcial: ` +
+    `${resumo.email.parciais}`
+  );
+
+  console.log(
+    `OS com falha de e-mail: ` +
     `${resumo.email.falhas}`
   );
 

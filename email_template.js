@@ -1,6 +1,13 @@
 // ============================================================
-//  email_template.js  -  MONTAGEM DO EMAIL (uma OS = um email) - Montagem de acordo com o Banco da Empresa
-// ------------------------------------------------------------
+// email_template.js — MONTAGEM DO E-MAIL DIÁRIO
+// ============================================================
+// Regra de negócio:
+// - Uma OS pode gerar um e-mail individual por destinatário.
+// - O primeiro e-mail do cliente é o contato principal.
+// - Somente o contato principal recebe a credencial inicial legada.
+// - Os demais destinatários recebem a mesma atualização da empresa,
+//   sem exposição da senha inicial do contato principal.
+// ============================================================
 
 function esc(s) {
   return String(s || '')
@@ -9,10 +16,6 @@ function esc(s) {
     .replace(/>/g, '&gt;');
 }
 
-// ------------------------------------------------------------
-// DE-PARA de status: nome real no Airtable -> nome exibido no email
-// (muda so a exibicao; o filtro da view usa os nomes reais)
-// ------------------------------------------------------------
 const STATUS_EXIBICAO = {
   'Aguardando Preparação': 'Amostra recebida',
   'Enviado ao Cliente': 'Relatório Pronto',
@@ -22,23 +25,22 @@ function statusExibido(statusReal) {
   return STATUS_EXIBICAO[statusReal] || statusReal || '-';
 }
 
-// cor da pilula conforme o status EXIBIDO
 function corDoStatus(statusExib) {
   const s = (statusExib || '').toLowerCase();
 
   if (s.includes('relatório pronto') || s.includes('relatorio pronto')) {
-    return { fundo: '#dcfce7', texto: '#166534' }; // verde
+    return { fundo: '#dcfce7', texto: '#166534' };
   }
 
   if (s.includes('amostra recebida')) {
-    return { fundo: '#dbeafe', texto: '#1e40af' }; // azul
+    return { fundo: '#dbeafe', texto: '#1e40af' };
   }
 
   if (s.includes('andamento')) {
-    return { fundo: '#fef3c7', texto: '#92400e' }; // laranja
+    return { fundo: '#fef3c7', texto: '#92400e' };
   }
 
-  return { fundo: '#f3f4f6', texto: '#374151' }; // cinza (fallback)
+  return { fundo: '#f3f4f6', texto: '#374151' };
 }
 
 function pilulaStatus(statusReal) {
@@ -59,20 +61,118 @@ function linhaTabela(l) {
     + `</tr>`;
 }
 
-// ------------------------------------------------------------
-// montarEmailDaOS(cliente, ordem)
-// ------------------------------------------------------------
-function montarEmailDaOS(cliente, ordem) {
-  const nomeCliente = cliente.clienteNome || 'Cliente';
-  const os = ordem.osNome || 'Ordem de Serviço';
+function emailValidoBasico(valor) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(valor || '').trim());
+}
 
-  // Dados de primeiro acesso ao Portal. O e-mail é apenas a credencial
-  // inicial: depois da ativação, o cliente usa CNPJ + senha pessoal.
-  const usuarioLogin = cliente.cnpj || '-';
-  const senhaInicialPortal = cliente.email || '-';
+function obterEmailsCliente(cliente) {
+  const fontes = Array.isArray(cliente?.emails) && cliente.emails.length > 0
+    ? cliente.emails
+    : [cliente?.email || ''];
 
-  // data das alteracoes = ONTEM (o email de manha reporta o dia anterior),
-  // formatada por extenso no fuso de Brasilia. Ex: "07 de julho de 2026"
+  const vistos = new Set();
+  const emails = [];
+
+  for (const fonte of fontes.flat(Infinity)) {
+    const partes = String(fonte || '')
+      .split(/[;,|\n\r]+/)
+      .map(item => item.trim())
+      .filter(Boolean);
+
+    for (const email of partes) {
+      const chave = email.toLowerCase();
+      if (!emailValidoBasico(email) || vistos.has(chave)) continue;
+      vistos.add(chave);
+      emails.push(email);
+    }
+  }
+
+  return emails;
+}
+
+function emailPrincipalDoCliente(cliente, emails = obterEmailsCliente(cliente)) {
+  const configurado = String(cliente?.emailPrincipal || '').trim();
+
+  if (emailValidoBasico(configurado)) {
+    return configurado;
+  }
+
+  return emails[0] || '';
+}
+
+function montarBlocoAcessoHtml({
+  usuarioLogin,
+  destinatarioEmail,
+  emailPrincipal,
+  ehContatoPrincipal,
+}) {
+  if (ehContatoPrincipal) {
+    return `
+        <div style="margin:14px 0 18px;padding:14px 16px;background:#f7f8fa;border:1px solid #e6e9ef;border-radius:10px;">
+          <p style="margin:0 0 8px;font-size:13px;line-height:1.5;color:#374151;">
+            <strong style="color:#0f2543;">CNPJ de acesso:</strong> ${esc(usuarioLogin)}
+          </p>
+          <p style="margin:0;font-size:13px;line-height:1.5;color:#374151;">
+            <strong style="color:#0f2543;">Senha inicial (somente no primeiro acesso):</strong> ${esc(emailPrincipal || destinatarioEmail || '-')}
+          </p>
+        </div>
+
+        <p style="margin:0 0 16px;font-size:12.5px;line-height:1.6;color:#6b7280;">
+          No primeiro acesso, o Portal solicitará a criação de uma senha pessoal. Depois disso, use CNPJ + sua senha pessoal.
+        </p>`;
+  }
+
+  return `
+        <div style="margin:14px 0 18px;padding:14px 16px;background:#f7f8fa;border:1px solid #e6e9ef;border-radius:10px;">
+          <p style="margin:0 0 8px;font-size:13px;line-height:1.5;color:#374151;">
+            <strong style="color:#0f2543;">CNPJ do cliente:</strong> ${esc(usuarioLogin)}
+          </p>
+          <p style="margin:0;font-size:13px;line-height:1.5;color:#374151;">
+            <strong style="color:#0f2543;">E-mail destinatário:</strong> ${esc(destinatarioEmail || '-')}
+          </p>
+        </div>
+
+        <p style="margin:0 0 16px;font-size:12.5px;line-height:1.6;color:#6b7280;">
+          Este endereço recebe as mesmas atualizações do cadastro da empresa. O primeiro acesso ao Portal permanece vinculado ao contato principal cadastrado; nenhuma senha inicial é exibida neste e-mail.
+        </p>`;
+}
+
+function montarBlocoAcessoTexto({
+  usuarioLogin,
+  destinatarioEmail,
+  emailPrincipal,
+  ehContatoPrincipal,
+}) {
+  if (ehContatoPrincipal) {
+    return `\n\nCNPJ de acesso: ${usuarioLogin}`
+      + `\nSenha inicial (somente no primeiro acesso): ${emailPrincipal || destinatarioEmail || '-'}`
+      + `\nNo primeiro acesso, crie sua senha pessoal. Depois disso, use CNPJ + sua senha pessoal.`;
+  }
+
+  return `\n\nCNPJ do cliente: ${usuarioLogin}`
+    + `\nE-mail destinatário: ${destinatarioEmail || '-'}`
+    + `\nEste endereço recebe as mesmas atualizações do cadastro da empresa. O primeiro acesso ao Portal permanece vinculado ao contato principal cadastrado; nenhuma senha inicial é exibida neste e-mail.`;
+}
+
+function montarEmailDaOS(cliente, ordem, contexto = {}) {
+  const nomeCliente = cliente?.clienteNome || 'Cliente';
+  const os = ordem?.osNome || 'Ordem de Serviço';
+  const usuarioLogin = cliente?.cnpj || '-';
+
+  const emails = obterEmailsCliente(cliente);
+  const emailPrincipal = emailPrincipalDoCliente(cliente, emails);
+  const destinatarioEmail = String(
+    contexto.destinatarioEmail || emailPrincipal || emails[0] || ''
+  ).trim();
+
+  const ehContatoPrincipal = typeof contexto.ehContatoPrincipal === 'boolean'
+    ? contexto.ehContatoPrincipal
+    : Boolean(
+        emailPrincipal &&
+        destinatarioEmail &&
+        emailPrincipal.toLowerCase() === destinatarioEmail.toLowerCase()
+      );
+
   const dataAlteracoes = new Date(Date.now() - 24 * 60 * 60 * 1000)
     .toLocaleDateString('pt-BR', {
       day: '2-digit',
@@ -82,7 +182,22 @@ function montarEmailDaOS(cliente, ordem) {
     });
 
   const assunto = `ITR Engenharia — Atualização nas amostras da ordem de serviço ${os}`;
-  const linhasHtml = ordem.linhas.map(linhaTabela).join('');
+  const linhas = Array.isArray(ordem?.linhas) ? ordem.linhas : [];
+  const linhasHtml = linhas.map(linhaTabela).join('');
+
+  const blocoAcessoHtml = montarBlocoAcessoHtml({
+    usuarioLogin,
+    destinatarioEmail,
+    emailPrincipal,
+    ehContatoPrincipal,
+  });
+
+  const blocoAcessoTexto = montarBlocoAcessoTexto({
+    usuarioLogin,
+    destinatarioEmail,
+    emailPrincipal,
+    ehContatoPrincipal,
+  });
 
   const html = `<!doctype html>
 <html lang="pt-BR">
@@ -93,14 +208,11 @@ function montarEmailDaOS(cliente, ordem) {
 <body style="margin:0;padding:0;background:#eef1f5;font-family:'Segoe UI',Arial,Helvetica,sans-serif;">
   <div style="max-width:620px;margin:0 auto;padding:24px 16px;">
     <div style="background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 1px 3px rgba(16,24,40,.08);border:1px solid #e6e9ef;">
-
-      <!-- CABECALHO azul marinho escuro com logo -->
       <div style="background:#0f2543;padding:26px 28px;text-align:center;">
         <img src="cid:logoITR" alt="ITR Engenharia" width="200"
              style="display:inline-block;max-width:200px;height:auto;" />
       </div>
 
-      <!-- CORPO -->
       <div style="padding:28px;">
         <p style="margin:0 0 16px;font-size:16px;color:#111827;">
           Olá, <strong>${esc(nomeCliente)}</strong>.
@@ -127,18 +239,7 @@ function montarEmailDaOS(cliente, ordem) {
           <a href="https://portal.itr.eng.br/login.html" style="color:#0f2543;font-weight:600;text-decoration:underline;">https://portal.itr.eng.br/login.html</a>
         </p>
 
-        <div style="margin:14px 0 18px;padding:14px 16px;background:#f7f8fa;border:1px solid #e6e9ef;border-radius:10px;">
-          <p style="margin:0 0 8px;font-size:13px;line-height:1.5;color:#374151;">
-            <strong style="color:#0f2543;">CNPJ de acesso:</strong> ${esc(usuarioLogin)}
-          </p>
-          <p style="margin:0;font-size:13px;line-height:1.5;color:#374151;">
-            <strong style="color:#0f2543;">Senha inicial (somente no primeiro acesso):</strong> ${esc(senhaInicialPortal)}
-          </p>
-        </div>
-
-        <p style="margin:0 0 16px;font-size:12.5px;line-height:1.6;color:#6b7280;">
-          No primeiro acesso, o Portal solicitará a criação de uma senha pessoal. Depois disso, o e-mail acima não funcionará mais como senha.
-        </p>
+${blocoAcessoHtml}
 
         <p style="margin:16px 0 4px;font-size:14px;line-height:1.6;color:#374151;">
           Permanecemos à disposição para qualquer esclarecimento.
@@ -164,20 +265,51 @@ function montarEmailDaOS(cliente, ordem) {
   const texto = `ITR Engenharia — Atualização da ${os}\n\n`
     + `Olá, ${nomeCliente}.\n\n`
     + `Passamos para informar que houve atualizações na ordem de serviço ${os} em ${dataAlteracoes}. Seguem as alterações:\n\n`
-    + ordem.linhas.map(l =>
+    + linhas.map(l =>
         `- Amostra ${l.amostra || '-'} | ${l.ensaioNome || l.ensaioSigla || '-'} | ${statusExibido(l.status)}`
       ).join('\n')
     + `\n\nSegue link para o acompanhamento de suas amostras:\nhttps://portal.itr.eng.br/login.html`
-    + `\n\nCNPJ de acesso: ${usuarioLogin}`
-    + `\nSenha inicial (somente no primeiro acesso): ${senhaInicialPortal}`
-    + `\nNo primeiro acesso, crie sua senha pessoal. Depois disso, use CNPJ + sua senha. `
+    + blocoAcessoTexto
     + `\n\nAtenciosamente,\nEquipe ITR Engenharia`;
 
-  return { assunto, html, texto };
+  return {
+    assunto,
+    html,
+    texto,
+    destinatarioEmail,
+    emailPrincipal,
+    ehContatoPrincipal,
+  };
+}
+
+function montarEmailsIndividualizados(cliente, ordem) {
+  const emails = obterEmailsCliente(cliente);
+  const emailPrincipal = emailPrincipalDoCliente(cliente, emails);
+
+  if (emails.length === 0) {
+    return [];
+  }
+
+  return emails.map(destinatarioEmail => ({
+    destinatario: destinatarioEmail,
+    ehContatoPrincipal:
+      Boolean(emailPrincipal) &&
+      destinatarioEmail.toLowerCase() === emailPrincipal.toLowerCase(),
+    ...montarEmailDaOS(cliente, ordem, {
+      destinatarioEmail,
+      emailPrincipal,
+      ehContatoPrincipal:
+        Boolean(emailPrincipal) &&
+        destinatarioEmail.toLowerCase() === emailPrincipal.toLowerCase(),
+    }),
+  }));
 }
 
 module.exports = {
   montarEmailDaOS,
+  montarEmailsIndividualizados,
+  obterEmailsCliente,
+  emailPrincipalDoCliente,
   statusExibido,
   STATUS_EXIBICAO,
 };

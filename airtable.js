@@ -210,7 +210,7 @@ const CONTATOS_USAR_TODOS_REGISTROS =
 const BLOQUEAR_WHATSAPP_COMPARTILHADO =
   booleanoEnv(
     'AIRTABLE_BLOQUEAR_WHATSAPP_COMPARTILHADO',
-    true
+    false
   );
 
 const LOG_DADOS_INVALIDOS = booleanoEnv(
@@ -420,7 +420,7 @@ function listaSeparada(valor) {
   return itens
     .flatMap(item =>
       String(item ?? '')
-        .split(/[;,|\n]+/)
+        .split(/[;,|\n\r/]+/)
     )
     .map(item => item.trim())
     .filter(Boolean);
@@ -578,7 +578,31 @@ function normalizarTelefoneContato(
     numero = numero.slice(2);
   }
 
-  // DDD + telefone brasileiro.
+  // Aceita o zero de tronco nacional, ex.: 0 61 99999-9999.
+  if (
+    numero.startsWith('0') &&
+    (numero.length === 11 || numero.length === 12)
+  ) {
+    const semZero = numero.slice(1);
+
+    if (
+      semZero.length === 10 ||
+      semZero.length === 11
+    ) {
+      numero = semZero;
+    }
+  }
+
+  // Aceita 55 0 DDD número.
+  if (
+    codigoPaisPadrao === '55' &&
+    numero.startsWith('550') &&
+    (numero.length === 13 || numero.length === 14)
+  ) {
+    numero = `55${numero.slice(3)}`;
+  }
+
+  // DDD + telefone brasileiro (fixo ou móvel).
   if (
     codigoPaisPadrao &&
     (
@@ -590,6 +614,8 @@ function normalizarTelefoneContato(
       `${codigoPaisPadrao}${numero}`;
   }
 
+  // A Meta é a autoridade final sobre a existência do destino.
+  // Aqui só exigimos um formato internacional plausível.
   if (!/^[1-9]\d{7,14}$/.test(numero)) {
     return {
       ok: false,
@@ -1280,6 +1306,7 @@ function criarPerfilCliente(
       clienteNome || clienteId,
 
     emails: new Map(),
+    emailPrincipal: '',
     emailsInvalidos: new Map(),
 
     cnpjs: new Map(),
@@ -1331,6 +1358,14 @@ function incorporarContatosAoPerfil(
         CAMPOS.emailCliente
       )
     );
+
+  if (
+    !perfil.emailPrincipal &&
+    emails.validos.length > 0
+  ) {
+    perfil.emailPrincipal =
+      emails.validos[0];
+  }
 
   for (const email of emails.validos) {
     perfil.emails.set(
@@ -1511,6 +1546,10 @@ function analisarWhatsappDoCliente({
     ([numero]) => numero
   );
 
+  const originaisPorNumero = new Map(
+    telefones
+  );
+
   const originais = telefones.map(
     ([, original]) => original
   );
@@ -1549,6 +1588,16 @@ function analisarWhatsappDoCliente({
       NUMEROS_BLOQUEADOS.has(numero)
     );
 
+  const numerosPermitidos =
+    numeros.filter(numero =>
+      !NUMEROS_BLOQUEADOS.has(numero)
+    );
+
+  const originaisPermitidos =
+    numerosPermitidos.map(numero =>
+      originaisPorNumero.get(numero) || numero
+    );
+
   const compartilhado =
     numerosCompartilhados.length > 0;
 
@@ -1556,9 +1605,10 @@ function analisarWhatsappDoCliente({
     compartilhado &&
     BLOQUEAR_WHATSAPP_COMPARTILHADO;
 
-  // Ter mais de um número no mesmo cliente é permitido.
-  // Ambiguidade continua existindo somente quando um número
-  // também pertence a outro cliente e essa proteção está ativa.
+  const todosBloqueados =
+    numeros.length > 0 &&
+    numerosPermitidos.length === 0;
+
   const whatsappAmbiguo =
     compartilhadoBloqueante;
 
@@ -1574,7 +1624,7 @@ function analisarWhatsappDoCliente({
     );
   }
 
-  if (numerosBloqueados.length > 0) {
+  if (todosBloqueados) {
     motivos.push('numero-bloqueado');
   }
 
@@ -1588,29 +1638,29 @@ function analisarWhatsappDoCliente({
   }
 
   const whatsappSeguroParaEnvio = Boolean(
-    numeros.length > 0 &&
-    !whatsappAmbiguo &&
-    numerosBloqueados.length === 0
+    numerosPermitidos.length > 0 &&
+    !whatsappAmbiguo
   );
 
   return {
-    // Compatibilidade com integrações antigas que esperam
-    // apenas um campo textual. O envio novo usa a lista abaixo.
     whatsapp:
-      originais[0] || '',
+      originaisPermitidos[0] ||
+      originais[0] ||
+      '',
 
     whatsappAmbiguo,
 
-    // Todos os números válidos e únicos encontrados para o
-    // cliente. Cada um receberá a mesma notificação da OS.
     whatsappsEncontrados:
       originais,
 
     whatsappsParaEnvio:
-      originais,
+      originaisPermitidos,
 
     whatsappDuplicadoEntreClientes:
       compartilhado,
+
+    whatsappCompartilhadoBloqueante:
+      compartilhadoBloqueante,
 
     clientesComMesmoWhatsapp:
       ordenarTextos(
@@ -1619,6 +1669,9 @@ function analisarWhatsappDoCliente({
 
     whatsappBloqueado:
       numerosBloqueados.length > 0,
+
+    whatsappTodosBloqueados:
+      todosBloqueados,
 
     whatsappSeguroParaEnvio,
 
@@ -1630,8 +1683,6 @@ function analisarWhatsappDoCliente({
         ? perfil.telefonesInvalidos.size
         : 0,
 
-    // Somente máscaras; não expõe números completos em
-    // relatórios futuros.
     whatsappsCompartilhadosMascarados:
       numerosCompartilhados.map(
         mascararTelefone
@@ -1693,7 +1744,9 @@ function registrarAvisosCliente(
       `${clienteFinal.clienteNome}: ` +
       `telefone compartilhado com ` +
       `${clienteFinal.clientesComMesmoWhatsapp.join(' | ')}. ` +
-      `O envio será bloqueado.`
+      (clienteFinal.whatsappCompartilhadoBloqueante
+        ? `O envio será bloqueado pela configuração atual.`
+        : `O envio será permitido e registrado para auditoria.`)
     );
   }
 
@@ -2150,6 +2203,14 @@ function agruparPorClienteEOSDetalhado(
       clienteNome: cliente.clienteNome,
 
       emails,
+
+      // Primeiro e-mail válido na ordem consolidada do Airtable.
+      // É o único contato tratado como credencial inicial legada
+      // enquanto o Portal ainda usa uma conta por cliente.
+      emailPrincipal:
+        perfil.emailPrincipal ||
+        emails[0] ||
+        '',
 
       // Compatibilidade com o fluxo atual de e-mail.
       email: emails.join(', '),

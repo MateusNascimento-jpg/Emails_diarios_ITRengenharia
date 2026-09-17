@@ -6,10 +6,10 @@ Serviço Node.js da ITR Engenharia para:
 - disparar WhatsApp a partir de template aprovado;
 - receber notificações transacionais fechadas do Portal ITR;
 - aplicar HMAC, timestamp e nonce no canal Portal → Notificações;
-- manter proteção contra contatos de WhatsApp ambíguos/compartilhados;
+- auditar números de WhatsApp compartilhados sem bloquear por padrão;
 - oferecer idempotência persistente opcional no Airtable.
 
-Versão deste pacote: **2.1.2**.
+Versão deste pacote: **2.2.0**.
 
 ## Antes de iniciar
 
@@ -26,7 +26,22 @@ npm test
 
 O serviço também valida configuração crítica no startup.
 
-A 2.1.2 também bloqueia:
+A 2.2.0 mantém os bloqueios de segurança de configuração e adiciona as regras abaixo.
+
+### Regras 2.2.0 — contatos e destinatários
+
+- cada telefone válido é processado independentemente;
+- um telefone inválido/bloqueado não derruba os demais números válidos do cliente;
+- números compartilhados entre clientes geram aviso de auditoria e são permitidos por padrão;
+- para voltar ao bloqueio rígido, use `AIRTABLE_BLOQUEAR_WHATSAPP_COMPARTILHADO=true`;
+- são aceitos formatos comuns com `+55`, `0055`, `0 + DDD`, parênteses, espaços e hífens;
+- `;`, `,`, `|`, `/` e quebra de linha podem separar múltiplos telefones;
+- cada e-mail cadastrado recebe uma mensagem individual, sem expor os outros destinatários;
+- o primeiro e-mail consolidado do Airtable é o contato principal e é o único que recebe a senha inicial legada;
+- destinatários secundários recebem a mesma atualização do cliente, mas sem a senha inicial do contato principal;
+- falhas finais da Meta recebidas pelo webhook ficam detalhadas nos logs e nas falhas recentes do `/status`.
+
+A 2.2.0 também bloqueia:
 
 - valores residuais como `<PREENCHER>`, `CHANGEME`, `TODO` e `TBD`;
 - nomes de campos do Airtable com sinais de encoding corrompido;

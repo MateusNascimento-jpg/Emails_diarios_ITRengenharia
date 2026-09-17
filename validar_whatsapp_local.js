@@ -472,6 +472,27 @@ function validarTelefone() {
     ).ok,
     false
   );
+
+  assert.equal(
+    normalizarTelefone(
+      '+55 (61) 98155-8001'
+    ).telefone,
+    '5561981558001'
+  );
+
+  assert.equal(
+    normalizarTelefone(
+      '0 61 98155-8001'
+    ).telefone,
+    '5561981558001'
+  );
+
+  assert.equal(
+    normalizarTelefone(
+      '556798535699'
+    ).telefone,
+    '556798535699'
+  );
 }
 
 function validarContatoSeguro() {
@@ -534,58 +555,80 @@ function validarBloqueioContatoInseguro() {
   );
 }
 
-function validarBloqueioMarcadoNoAirtable() {
+function validarNumeroBloqueadoNaoDerrubaOsDemais() {
   const resultado =
-    prepararComCliente({
-      whatsappBloqueado:
-        true,
+    validarSegurancaWhatsappCliente(
+      clienteBase({
+        whatsappsEncontrados: [
+          '5561988887777',
+          '5561999999999',
+        ],
 
-      whatsappMotivosBloqueio: [
-        'numero-bloqueado',
-      ],
-    });
+        whatsappsParaEnvio: [
+          '5561988887777',
+          '5561999999999',
+        ],
+
+        whatsappBloqueado: true,
+        whatsappSeguroParaEnvio: true,
+      }),
+      {
+        modoTeste: false,
+      }
+    );
 
   assert.equal(
     resultado.ok,
-    false
+    true
   );
 
   assert.equal(
-    resultado.motivo,
-    'numero-bloqueado-no-airtable'
+    resultado.telefonesCliente.length,
+    1
+  );
+
+  assert.equal(
+    resultado.telefonesCliente[0].telefone,
+    '5561999999999'
   );
 }
 
-function validarBloqueioNumeroCompartilhado() {
+function validarNumeroCompartilhadoPermitido() {
   const resultado =
-    prepararComCliente({
-      whatsappDuplicadoEntreClientes:
-        true,
+    validarSegurancaWhatsappCliente(
+      clienteBase({
+        whatsappDuplicadoEntreClientes:
+          true,
 
-      whatsappAmbiguo:
-        true,
+        whatsappCompartilhadoBloqueante:
+          false,
 
-      whatsappSeguroParaEnvio:
-        false,
+        whatsappAmbiguo:
+          false,
 
-      whatsappMotivosBloqueio: [
-        'numero-compartilhado-entre-clientes',
-      ],
+        whatsappSeguroParaEnvio:
+          true,
 
-      clientesComMesmoWhatsapp: [
-        'Cliente A',
-        'Cliente B',
-      ],
-    });
+        whatsappMotivosBloqueio: [],
+
+        clientesComMesmoWhatsapp: [
+          'Cliente A',
+          'Cliente B',
+        ],
+      }),
+      {
+        modoTeste: false,
+      }
+    );
 
   assert.equal(
     resultado.ok,
-    false
+    true
   );
 
   assert.equal(
-    resultado.motivo,
-    'numero-compartilhado-entre-clientes'
+    resultado.numeroCompartilhado,
+    true
   );
 
   assert.equal(
@@ -699,17 +742,26 @@ function validarBloqueioContatoInvalido() {
 
 function validarBloqueioPorListaDoAmbiente() {
   const resultado =
-    prepararComCliente({
-      whatsapp:
-        '61988887777',
+    validarSegurancaWhatsappCliente(
+      clienteBase({
+        whatsapp:
+          '61988887777',
 
-      whatsappsEncontrados: [
-        '5561988887777',
-      ],
+        whatsappsEncontrados: [
+          '5561988887777',
+        ],
 
-      whatsappSeguroParaEnvio:
-        true,
-    });
+        whatsappsParaEnvio: [
+          '5561988887777',
+        ],
+
+        whatsappSeguroParaEnvio:
+          true,
+      }),
+      {
+        modoTeste: false,
+      }
+    );
 
   assert.equal(
     resultado.ok,
@@ -718,7 +770,7 @@ function validarBloqueioPorListaDoAmbiente() {
 
   assert.equal(
     resultado.motivo,
-    'numero-bloqueado'
+    'todos-numeros-bloqueados'
   );
 
   assert.match(
@@ -993,8 +1045,8 @@ function executar() {
   validarContatoSeguro();
   validarPreparacao();
   validarBloqueioContatoInseguro();
-  validarBloqueioMarcadoNoAirtable();
-  validarBloqueioNumeroCompartilhado();
+  validarNumeroBloqueadoNaoDerrubaOsDemais();
+  validarNumeroCompartilhadoPermitido();
   validarMultiplosContatosPermitidos();
   validarBloqueioContatoAmbiguo();
   validarBloqueioContatoInvalido();
@@ -1029,7 +1081,7 @@ function executar() {
   );
 
   console.log(
-    'NÚMEROS COMPARTILHADOS: BLOQUEADOS'
+    'NÚMEROS COMPARTILHADOS: AUDITADOS E PERMITIDOS POR PADRÃO'
   );
 
   console.log(

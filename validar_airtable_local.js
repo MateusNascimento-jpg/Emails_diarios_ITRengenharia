@@ -22,7 +22,7 @@
 // 3. Histórico só é acessível em auditoria explícita.
 // 4. Data sem horário/fuso é recusada no fluxo operacional.
 // 5. Mais de um número no mesmo cliente é permitido.
-// 6. Telefone compartilhado entre clientes é bloqueado.
+// 6. Telefone compartilhado entre clientes é auditado e permitido por padrão.
 // 7. Número presente na lista de bloqueados é recusado.
 // 8. Linhas duplicadas são consolidadas.
 // 9. Contatos antigos podem complementar registros recentes.
@@ -57,7 +57,7 @@ process.env.AIRTABLE_CONTATOS_USAR_TODOS_REGISTROS =
   'true';
 
 process.env.AIRTABLE_BLOQUEAR_WHATSAPP_COMPARTILHADO =
-  'true';
+  'false';
 
 process.env.AIRTABLE_LOG_DADOS_INVALIDOS =
   'false';
@@ -721,20 +721,22 @@ function validarTelefoneCompartilhado() {
 
     assert.equal(
       cliente.whatsappAmbiguo,
-      true
+      false
+    );
+
+    assert.equal(
+      cliente.whatsappCompartilhadoBloqueante,
+      false
     );
 
     assert.equal(
       cliente.whatsappSeguroParaEnvio,
-      false
+      true
     );
 
-    assert.ok(
-      cliente
-        .whatsappMotivosBloqueio
-        .includes(
-          'numero-compartilhado-entre-clientes'
-        )
+    assert.equal(
+      cliente.whatsappsParaEnvio.length,
+      1
     );
 
     assert.equal(
@@ -829,7 +831,12 @@ function validarUmDosNumerosCompartilhado() {
 
   assert.equal(
     clienteA.whatsappSeguroParaEnvio,
-    false
+    true
+  );
+
+  assert.equal(
+    clienteA.whatsappsParaEnvio.length,
+    2
   );
 }
 
@@ -944,7 +951,12 @@ function validarUmDosNumerosBloqueado() {
 
   assert.equal(
     cliente.whatsappSeguroParaEnvio,
-    false
+    true
+  );
+
+  assert.equal(
+    cliente.whatsappsParaEnvio.length,
+    1
   );
 }
 
@@ -1435,7 +1447,7 @@ function executar() {
   );
 
   console.log(
-    'TELEFONES COMPARTILHADOS ENTRE CLIENTES: BLOQUEADOS'
+    'TELEFONES COMPARTILHADOS ENTRE CLIENTES: AUDITADOS E PERMITIDOS'
   );
 
   console.log(

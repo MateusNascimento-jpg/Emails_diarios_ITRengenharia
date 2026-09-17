@@ -147,6 +147,7 @@ const estado = {
     ultimoRecebidoEm: null,
     ultimoEvento: null,
     ultimoErro: null,
+    falhasRecentes: [],
   },
 };
 
@@ -451,6 +452,9 @@ function resumoSeguroWebhook() {
 
     ultimoErro:
       estado.webhook.ultimoErro,
+
+    falhasRecentes:
+      estado.webhook.falhasRecentes,
   };
 }
 //Validar assinatura do webhook do WhatsApp utilizando máscara HMAC-SHA256
@@ -539,6 +543,12 @@ function tratarStatusMensagem(status) {
           codigo:
             item?.code ?? null,
 
+          subcodigo:
+            item?.error_subcode ??
+            item?.error_data
+              ?.error_subcode ??
+            null,
+
           titulo:
             item?.title ?? null,
 
@@ -591,6 +601,52 @@ function tratarStatusMensagem(status) {
     `${resumo.destinatario || 'não informado'}; ` +
     `erros: ${resumo.quantidadeErros}.`
   );
+
+  if (
+    resumo.status === 'failed' ||
+    erros.length > 0
+  ) {
+    const falha = {
+      recebidoEm:
+        new Date().toISOString(),
+      ...resumo,
+    };
+
+    estado.webhook.falhasRecentes.push(
+      falha
+    );
+
+    if (
+      estado.webhook.falhasRecentes.length > 20
+    ) {
+      estado.webhook.falhasRecentes.splice(
+        0,
+        estado.webhook.falhasRecentes.length - 20
+      );
+    }
+
+    if (erros.length === 0) {
+      console.error(
+        `[Webhook WhatsApp/Meta] ` +
+        `falha sem detalhes retornados pela Meta; ` +
+        `mensagem=${resumo.messageId || '-'}; ` +
+        `destino=${resumo.destinatario || '-'}.`
+      );
+    }
+
+    for (const erro of erros) {
+      console.error(
+        `[Webhook WhatsApp/Meta] ` +
+        `code=${erro.codigo ?? '-'}; ` +
+        `subcode=${erro.subcodigo ?? '-'}; ` +
+        `title=${erro.titulo || '-'}; ` +
+        `message=${erro.mensagem || '-'}; ` +
+        `details=${erro.detalhes || '-'}; ` +
+        `mensagem=${resumo.messageId || '-'}; ` +
+        `destino=${resumo.destinatario || '-'}.`
+      );
+    }
+  }
 }
 
 function tratarMensagemRecebida(mensagem) {
