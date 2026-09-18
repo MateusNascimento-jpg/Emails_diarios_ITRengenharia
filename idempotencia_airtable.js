@@ -438,12 +438,45 @@ function avaliarControle({
   canal,
   hash,
   agora = new Date(),
+  fonteAtualizadaEm = '',
 } = {}) {
   const controle =
     lerControleDoRegistro(
       registro,
       canal
     );
+
+  const fonteAtualizada =
+    dataValida(
+      fonteAtualizadaEm
+    );
+
+  const controleAtualizado =
+    dataValida(
+      controle.atualizadoEm
+    );
+
+  // Migração segura de template/layout: se a fonte de dados da OS não
+  // mudou desde um envio já confirmado, uma alteração apenas no hash
+  // renderizado não deve disparar o mesmo ciclo novamente.
+  if (
+    controle.estado ===
+      ESTADOS.enviado &&
+    fonteAtualizada &&
+    controleAtualizado &&
+    fonteAtualizada.getTime() <=
+      controleAtualizado.getTime() &&
+    controle.hashConteudo !== hash
+  ) {
+    return {
+      permitirReserva: false,
+      bloqueado: true,
+      confirmadoAnteriormente: true,
+      motivo:
+        'fonte-ja-enviada-hash-alterado',
+      controle,
+    };
+  }
 
   if (
     !controle.hashConteudo ||
@@ -863,6 +896,7 @@ async function reservarEnvio({
   osId,
   hash,
   agora = new Date(),
+  fonteAtualizadaEm = '',
 } = {}) {
   const configuracao =
     validarConfiguracao();
@@ -927,6 +961,7 @@ async function reservarEnvio({
         canal: canalFinal,
         hash: hashFinal,
         agora: dataAgora,
+        fonteAtualizadaEm,
       });
 
     if (!avaliacao.permitirReserva) {

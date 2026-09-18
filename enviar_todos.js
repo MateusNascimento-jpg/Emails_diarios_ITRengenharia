@@ -11,8 +11,8 @@
 //      Cliente → Ordem de Serviço → Linhas.
 // 4. Gera um e-mail individual por destinatário de cada OS.
 // 5. Após o e-mail, gera a notificação de WhatsApp da OS.
-// 6. Todas as amostras, ensaios e status da mesma OS são
-//    incluídos no mesmo conteúdo.
+// 6. O e-mail mantém os detalhes da OS; o WhatsApp leva apenas
+//    identificação da OS e status consolidado no template V3.
 // 7. Se o cliente possuir mais de um WhatsApp válido, a mesma
 //    notificação será enviada para cada número.
 // 8. Uma falha em um canal não encerra toda a execução.
@@ -192,6 +192,43 @@ function destinoEmailDoCliente(cliente) {
   return cliente?.email || '';
 }
 
+function ultimaAtualizacaoFonteDaOS(ordem) {
+  const linhas = Array.isArray(
+    ordem?.linhas
+  )
+    ? ordem.linhas
+    : [];
+
+  let maisRecente = null;
+
+  for (const linha of linhas) {
+    const bruto = String(
+      linha?.dataAtualizacao || ''
+    ).trim();
+
+    if (!bruto) {
+      continue;
+    }
+
+    const data = new Date(bruto);
+
+    if (Number.isNaN(data.getTime())) {
+      continue;
+    }
+
+    if (
+      !maisRecente ||
+      data.getTime() >
+        maisRecente.getTime()
+    ) {
+      maisRecente = data;
+    }
+  }
+
+  return maisRecente
+    ? maisRecente.toISOString()
+    : '';
+}
 function idempotenciaAplicavelAoEmail() {
   return (
     IDEMPOTENCIA_CONFIG.ativo &&
@@ -631,6 +668,11 @@ async function processarEmailDaOS({
             ordem?.osId || '',
 
           hash,
+
+          fonteAtualizadaEm:
+            ultimaAtualizacaoFonteDaOS(
+              ordem
+            ),
         });
 
       if (
@@ -1000,6 +1042,11 @@ async function processarWhatsAppDaOS({
               ordem?.osId || '',
 
             hash,
+
+            fonteAtualizadaEm:
+              ultimaAtualizacaoFonteDaOS(
+                ordem
+              ),
           });
 
         if (

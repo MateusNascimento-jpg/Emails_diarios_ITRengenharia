@@ -48,11 +48,32 @@ test('WhatsApp de segurança não recebe token nem actionUrl de redefinição', 
   assert.match(wa, /escolherTelefoneDestino/);
 });
 
-test('mensagem diária expõe CNPJ e e-mail apenas como credencial inicial', () => {
+test('mensagem diária mantém a credencial no e-mail e o WhatsApp V3 usa OS e status', () => {
   const email = read('email_template.js');
   const wa = read('whatsapp_template.js');
-  assert.match(email, /Senha inicial \(somente no primeiro acesso\)/);
-  assert.match(email, /Depois disso, use CNPJ \+ sua senha/);
-  assert.match(wa, /senha_inicial/);
-  assert.match(wa, /cnpj/);
+
+  assert.match(
+    email,
+    /CNPJ para acesso:/
+  );
+
+  assert.match(
+    email,
+    /E-mail cadastrado para primeiro acesso:/
+  );
+
+  assert.match(
+    email,
+    /Utilize seu e-mail cadastrado como senha inicial/
+  );
+
+  assert.match(
+    wa,
+    /order_service/
+  );
+
+  assert.match(
+    wa,
+    /order_status/
+  );
 });

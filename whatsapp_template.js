@@ -379,6 +379,95 @@ function itensDaOS(ordem) {
   return itens;
 }
 
+function statusDaOSParaWhatsApp(itens) {
+  const vistos = new Set();
+  const status = [];
+
+  for (
+    const item
+    of Array.isArray(itens)
+      ? itens
+      : []
+  ) {
+    const valor = limparTexto(
+      item?.status
+    );
+
+    if (!valor) {
+      continue;
+    }
+
+    const chave = valor
+      .normalize('NFKC')
+      .toLocaleLowerCase('pt-BR');
+
+    if (vistos.has(chave)) {
+      continue;
+    }
+
+    vistos.add(chave);
+    status.push(valor);
+  }
+
+  const prioridade = new Map([
+    ['amostra recebida', 0],
+    ['relatório pronto', 1],
+    ['relatorio pronto', 1],
+  ]);
+
+  status.sort((a, b) => {
+    const chaveA = a
+      .normalize('NFKC')
+      .toLocaleLowerCase('pt-BR');
+
+    const chaveB = b
+      .normalize('NFKC')
+      .toLocaleLowerCase('pt-BR');
+
+    const prioridadeA =
+      prioridade.get(chaveA) ?? 100;
+
+    const prioridadeB =
+      prioridade.get(chaveB) ?? 100;
+
+    if (prioridadeA !== prioridadeB) {
+      return prioridadeA - prioridadeB;
+    }
+
+    return a.localeCompare(
+      b,
+      'pt-BR',
+      {
+        sensitivity: 'base',
+      }
+    );
+  });
+
+  if (status.length === 0) {
+    return '-';
+  }
+
+  if (status.length === 1) {
+    return status[0];
+  }
+
+  if (status.length === 2) {
+    return `${status[0]} e ${status[1]}`;
+  }
+
+  return (
+    `${status.slice(0, -1).join(', ')} e ` +
+    `${status[status.length - 1]}`
+  );
+}
+
+function templateUsaDetalhes() {
+  return analisarMapeamentoCorpo()
+    .some(
+      item =>
+        item.source === 'detalhes'
+    );
+}
 function detalhesEmBlocos(itens) {
   return itens
     .map(
@@ -940,14 +1029,38 @@ function montarVariaveisDaOS(
       '-'
     );
 
-  const detalhesResultado =
-    opcoes.detalhesResultado ||
-    escolherDetalhes(
-      itens,
-      ordemServico
+  const usaDetalhesNoTemplate =
+    templateUsaDetalhes();
+
+  const statusOrdem =
+    statusDaOSParaWhatsApp(
+      itens
     );
 
+  const detalhesResultado =
+    usaDetalhesNoTemplate
+      ? (
+          opcoes.detalhesResultado ||
+          escolherDetalhes(
+            itens,
+            ordemServico
+          )
+        )
+      : {
+          formatoUsado:
+            'nao-utilizado',
+          texto:
+            '-',
+          tamanhoDetalhes:
+            0,
+          tamanhoCorpoEstimado:
+            0,
+          limiteCorpo:
+            CONFIG.templateBodyMaxChars,
+        };
+
   if (
+    usaDetalhesNoTemplate &&
     detalhesResultado
       .formatoUsado ===
     'blocos'
@@ -959,6 +1072,7 @@ function montarVariaveisDaOS(
   }
 
   if (
+    usaDetalhesNoTemplate &&
     !detalhesCabem(
       detalhesResultado
     )
@@ -1046,6 +1160,12 @@ function montarVariaveisDaOS(
     Object.freeze({
       ordem_servico:
         ordemServico,
+
+      order_service:
+        ordemServico,
+
+      order_status:
+        statusOrdem,
 
       os:
         ordemServico,
@@ -1207,6 +1327,42 @@ function montarVariaveisDaOSPartes(
         ordem?.osId,
       '-'
     );
+
+  // O V3 usa apenas order_service + order_status. Como não transporta
+  // a lista de ensaios no parâmetro dinâmico, uma OS gera exatamente
+  // uma mensagem por destino, independentemente da quantidade de linhas.
+  if (!templateUsaDetalhes()) {
+    const variaveis =
+      montarVariaveisDaOS(
+        cliente,
+        ordem,
+        {
+          itens,
+          ordemServico:
+            ordemServicoBase,
+          parteAtual: 1,
+          totalPartes: 1,
+          quantidadeItensTotal:
+            itens.length,
+        }
+      );
+
+    return {
+      ok: variaveis.ok,
+      motivo:
+        variaveis.motivo || '',
+      partes:
+        variaveis.ok
+          ? [variaveis]
+          : [],
+      quantidadePartes:
+        variaveis.ok ? 1 : 0,
+      quantidadeItens:
+        itens.length,
+      ordemServico:
+        ordemServicoBase,
+    };
+  }
 
   const completo =
     escolherDetalhes(

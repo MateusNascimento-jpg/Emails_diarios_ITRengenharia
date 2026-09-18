@@ -135,7 +135,7 @@ test('lista legada de números não bloqueia destinatários por padrão', () => 
   );
 });
 
-test('e-mails são individualizados e só o principal recebe a senha inicial', () => {
+test('e-mails são individualizados e todos recebem a indicação do e-mail de primeiro acesso da OS', () => {
   const cliente = {
     clienteNome: 'Empresa Exemplo',
     cnpj: '12345678000190',
@@ -144,43 +144,82 @@ test('e-mails são individualizados e só o principal recebe a senha inicial', (
       'engenharia@empresa.com.br',
       'obras@empresa.com.br',
     ],
-    emailPrincipal: 'principal@empresa.com.br',
+
+    // Simula um contato global legado que não pertence à OS.
+    emailPrincipal: 'contato-global@empresa.com.br',
   };
 
   const ordem = {
     osNome: 'OS-TESTE',
+
+    // A OS possui seus próprios destinatários, consolidados a partir
+    // dos records aceitos daquela OS.
+    emails: [
+      'principal@empresa.com.br',
+      'engenharia@empresa.com.br',
+      'obras@empresa.com.br',
+    ],
+
+    emailPrincipal:
+      'principal@empresa.com.br',
+
     linhas: [{
       amostra: 'A-01',
       ensaioNome: 'CBR',
       status: 'Enviado ao Cliente',
+      dataAtualizacao:
+        '2026-09-17T12:00:00.000Z',
     }],
   };
 
-  const mensagens = montarEmailsIndividualizados(cliente, ordem);
+  const mensagens =
+    montarEmailsIndividualizados(
+      cliente,
+      ordem
+    );
 
   assert.equal(mensagens.length, 3);
-  assert.equal(mensagens[0].ehContatoPrincipal, true);
-  assert.equal(mensagens[1].ehContatoPrincipal, false);
 
-  assert.match(
-    mensagens[0].texto,
-    /Senha inicial \(somente no primeiro acesso\): principal@empresa\.com\.br/
+  assert.deepEqual(
+    mensagens.map(item => item.destinatario),
+    [
+      'principal@empresa.com.br',
+      'engenharia@empresa.com.br',
+      'obras@empresa.com.br',
+    ]
   );
 
-  assert.doesNotMatch(
-    mensagens[1].texto,
-    /Senha inicial \(somente no primeiro acesso\):/
+  assert.equal(
+    mensagens[0].emailPrincipal,
+    'principal@empresa.com.br'
   );
 
-  assert.doesNotMatch(
-    mensagens[1].texto,
-    /principal@empresa\.com\.br/
-  );
+  for (const mensagem of mensagens) {
+    assert.match(
+      mensagem.texto,
+      /CNPJ para acesso: 12\.345\.678\/0001-90/
+    );
 
-  assert.match(
-    mensagens[1].texto,
-    /E-mail destinatário: engenharia@empresa\.com\.br/
-  );
+    assert.match(
+      mensagem.texto,
+      /E-mail cadastrado para primeiro acesso:\nprincipal@empresa\.com\.br/
+    );
+
+    assert.match(
+      mensagem.texto,
+      /Utilize seu e-mail cadastrado como senha inicial/
+    );
+
+    assert.doesNotMatch(
+      mensagem.texto,
+      /contato-global@empresa\.com\.br/
+    );
+
+    assert.doesNotMatch(
+      mensagem.texto,
+      /E-mail destinatário:/
+    );
+  }
 });
 
 

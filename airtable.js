@@ -2086,6 +2086,11 @@ function agruparPorClienteEOSDetalhado(
                 CAMPOS.osTexto
               )
             ) || osId,
+
+          // Destinatários pertencentes especificamente aos records
+          // aceitos desta Ordem de Serviço.
+          emails: new Map(),
+
           linhas: new Map(),
         }
       );
@@ -2093,6 +2098,34 @@ function agruparPorClienteEOSDetalhado(
 
     const ordem =
       cliente.ordens.get(osId);
+
+    // Credencial inicial do Portal: usa o primeiro e-mail válido do
+    // primeiro record aceito para esta OS. Isso evita que a ordem global
+    // de consolidação do cliente escolha outro endereço como principal.
+    const emailsDoRegistro =
+      separarEmailsDetalhado(
+        lerCampo(
+          campos,
+          CAMPOS.emailCliente
+        )
+      ).validos;
+
+    if (
+      !ordem.emailPrincipal &&
+      emailsDoRegistro.length > 0
+    ) {
+      ordem.emailPrincipal =
+        emailsDoRegistro[0];
+    }
+
+    // A atualização desta OS deve ir apenas para a união dos e-mails
+    // válidos encontrados nos records desta própria OS.
+    for (const email of emailsDoRegistro) {
+      ordem.emails.set(
+        email.toLowerCase(),
+        email
+      );
+    }
 
     const osNomeAtual = texto(
       lerCampo(
@@ -2268,6 +2301,14 @@ function agruparPorClienteEOSDetalhado(
     ].map(ordem => ({
       osId: ordem.osId,
       osNome: ordem.osNome,
+
+      emails: [
+        ...ordem.emails.values(),
+      ],
+
+      emailPrincipal:
+        ordem.emailPrincipal || '',
+
       linhas: [
         ...ordem.linhas.values(),
       ],
