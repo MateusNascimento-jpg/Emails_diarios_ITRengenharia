@@ -27,7 +27,7 @@
 // Os dados utilizados nos dois canais vêm do Airtable.
 // ============================================================
 
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 const {
   buscarResumoDiario,
@@ -250,6 +250,26 @@ function emailConfirmado(resultado) {
   return (
     resultado?.enviado === true ||
     resultado?.confirmadoAnteriormente === true
+  );
+}
+
+function erroEmailEhGlobal(erro) {
+  const codigo =
+    String(
+      erro?.code || ''
+    )
+      .trim()
+      .toUpperCase();
+
+  const resposta =
+    Number(
+      erro?.responseCode || 0
+    );
+
+  return (
+    codigo === 'EAUTH' ||
+    resposta === 530 ||
+    resposta === 535
   );
 }
 
@@ -693,6 +713,7 @@ async function processarEmailDaOS({
     }
 
     const resultados = [];
+    let erroGlobalCanal = null;
 
     for (
       let indice = 0;
@@ -789,6 +810,27 @@ async function processarEmailDaOS({
           contatoPrincipal:
             mensagem.ehContatoPrincipal === true,
         });
+
+        if (erroEmailEhGlobal(erro)) {
+          erroGlobalCanal = {
+            code:
+              String(erro?.code || ''),
+            responseCode:
+              Number(
+                erro?.responseCode || 0
+              ),
+            mensagem:
+              erro?.message ||
+              String(erro),
+          };
+
+          console.error(
+            `  [E-MAIL] Canal interrompido nesta execução: ` +
+            `falha global de autenticação SMTP.`
+          );
+
+          break;
+        }
       }
     }
 
@@ -867,13 +909,23 @@ async function processarEmailDaOS({
         false,
 
       motivo:
-        falhas.length === 0
-          ? ''
+        erroGlobalCanal
+          ? 'erro-email-global'
           : (
-              parcial
-                ? 'email-parcial'
-                : 'falha-email'
+              falhas.length === 0
+                ? ''
+                : (
+                    parcial
+                      ? 'email-parcial'
+                      : 'falha-email'
+                  )
             ),
+
+      erroGlobalCanal:
+        Boolean(erroGlobalCanal),
+
+      detalheErroGlobal:
+        erroGlobalCanal,
 
       quantidadeDestinos:
         resultados.length,
@@ -923,7 +975,27 @@ async function processarEmailDaOS({
         false,
 
       motivo:
-        'erro-email',
+        erroEmailEhGlobal(erro)
+          ? 'erro-email-global'
+          : 'erro-email',
+
+      erroGlobalCanal:
+        erroEmailEhGlobal(erro),
+
+      detalheErroGlobal:
+        erroEmailEhGlobal(erro)
+          ? {
+              code:
+                String(erro?.code || ''),
+              responseCode:
+                Number(
+                  erro?.responseCode || 0
+                ),
+              mensagem:
+                erro?.message ||
+                String(erro),
+            }
+          : null,
 
       mensagem:
         erro?.message ||
@@ -1245,6 +1317,8 @@ async function executarInternamente(
   }
 
   let clientes;
+  let emailCanalInterrompido = null;
+  let whatsappCanalInterrompido = null;
 
   try {
     clientes =
@@ -1363,15 +1437,52 @@ async function executarInternamente(
       // E-MAIL
       // ------------------------------------------------------
 
-      const emailResultado =
-        await processarEmailDaOS({
-          cliente,
-          ordem,
-          resumo,
-        });
+      let emailResultado;
+
+      if (emailCanalInterrompido) {
+        resumo.email.desativados += 1;
+
+        emailResultado = {
+          ok: false,
+          enviado: false,
+          ignorado: true,
+          motivo:
+            'canal-email-interrompido',
+          mensagem:
+            'O canal de e-mail foi interrompido após uma falha global de autenticação SMTP nesta execução.',
+        };
+
+        console.warn(
+          `  [E-MAIL PULADO] ` +
+          `${clienteNome} / ${osNome}: ` +
+          `canal interrompido após falha global anterior.`
+        );
+      } else {
+        emailResultado =
+          await processarEmailDaOS({
+            cliente,
+            ordem,
+            resumo,
+          });
+
+        if (
+          emailResultado
+            ?.erroGlobalCanal === true
+        ) {
+          emailCanalInterrompido =
+            emailResultado
+              .detalheErroGlobal ||
+            {
+              motivo:
+                emailResultado
+                  .motivo,
+            };
+        }
+      }
 
       if (
         CONFIG.emailAtivo &&
+        !emailCanalInterrompido &&
         (
           emailResultado.enviado === true ||
           emailResultado.ignorado !== true
@@ -1394,13 +1505,50 @@ async function executarInternamente(
       // cada número válido do cliente.
       // ------------------------------------------------------
 
-      const whatsappResultado =
-        await processarWhatsAppDaOS({
-          cliente,
-          ordem,
-          emailResultado,
-          resumo,
-        });
+      let whatsappResultado;
+
+      if (whatsappCanalInterrompido) {
+        resumo.whatsapp.ignorados += 1;
+
+        whatsappResultado = {
+          ok: false,
+          enviado: false,
+          simulado: false,
+          ignorado: true,
+          motivo:
+            'canal-whatsapp-interrompido',
+          mensagem:
+            'O canal WhatsApp foi interrompido após uma falha global da Meta nesta execução.',
+        };
+
+        console.warn(
+          `  [WHATSAPP PULADO] ` +
+          `${clienteNome} / ${osNome}: ` +
+          `canal interrompido após falha global anterior.`
+        );
+      } else {
+        whatsappResultado =
+          await processarWhatsAppDaOS({
+            cliente,
+            ordem,
+            emailResultado,
+            resumo,
+          });
+
+        if (
+          whatsappResultado
+            ?.erroGlobalCanal === true
+        ) {
+          whatsappCanalInterrompido =
+            whatsappResultado
+              .detalheErroGlobal ||
+            {
+              motivo:
+                whatsappResultado
+                  .motivo,
+            };
+        }
+      }
 
       if (
         whatsappResultado?.enviado === true ||
@@ -1624,24 +1772,50 @@ if (require.main === module) {
       '--ignorar-data'
     );
 
-  executarEnvioDiario({
+  const confirmarProducao =
+    process.argv.includes(
+      '--confirmar-producao'
+    );
+
+  const emailReal =
+    CONFIG.emailAtivo &&
+    !MODO_TESTE;
+
+  const whatsappReal =
+    WHATSAPP_CONFIG.ativo &&
+    !WHATSAPP_CONFIG.simular &&
+    !WHATSAPP_CONFIG.modoTeste;
+
+  if (
+    (emailReal || whatsappReal) &&
+    !confirmarProducao
+  ) {
+    console.error(
+      'ENVIO REAL BLOQUEADO: execução direta pelo terminal exige ' +
+      '--confirmar-producao. Use somente após revisar o ambiente.'
+    );
+
+    process.exitCode = 3;
+  } else {
+    executarEnvioDiario({
     ignorarData,
     origem:
       'terminal',
-  })
-    .then(resultado => {
-      if (
-        resultado?.executado === false
-      ) {
-        process.exitCode = 2;
-      }
     })
-    .catch(erro => {
-      console.error(
-        'ERRO FATAL NO PROCESSAMENTO:',
-        erro?.message || erro
-      );
+      .then(resultado => {
+        if (
+          resultado?.executado === false
+        ) {
+          process.exitCode = 2;
+        }
+      })
+      .catch(erro => {
+        console.error(
+          'ERRO FATAL NO PROCESSAMENTO:',
+          erro?.message || erro
+        );
 
-      process.exitCode = 1;
-    });
+        process.exitCode = 1;
+      });
+  }
 }

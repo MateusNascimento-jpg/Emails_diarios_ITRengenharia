@@ -1382,7 +1382,7 @@ function validarNormalizacaoTelefone() {
 
   assert.equal(
     invalido.motivo,
-    'telefone-invalido'
+    'telefone-sem-ddd-ou-pais'
   );
 }
 

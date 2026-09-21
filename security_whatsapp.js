@@ -6,6 +6,11 @@ const {
   CONFIG: META,
 } = require('./enviar_whatsapp.js');
 
+const {
+  normalizarParametroMeta,
+  validarPayloadTemplateMeta,
+} = require('./whatsapp_template.js');
+
 function textoEnv(nome, padrao = '') {
   return String(process.env[nome] ?? padrao).trim();
 }
@@ -63,17 +68,37 @@ async function enviarAvisoSegurancaWhatsApp({ type, client }) {
     type: 'template',
     template: {
       name: CONFIG.templateName,
-      language: { code: CONFIG.templateLanguage },
+      language: {
+        code: CONFIG.templateLanguage,
+      },
       components: [{
         type: 'body',
         parameters: [
-          { type: 'text', parameter_name: 'cliente', text: String(client?.name || 'Cliente').slice(0, 80) },
-          { type: 'text', parameter_name: 'evento', text: evento },
-          { type: 'text', parameter_name: 'portal_url', text: `${CONFIG.portalOrigin}/login.html` },
+          {
+            type: 'text',
+            parameter_name: 'cliente',
+            text: normalizarParametroMeta(
+              String(client?.name || 'Cliente').slice(0, 80)
+            ),
+          },
+          {
+            type: 'text',
+            parameter_name: 'evento',
+            text: normalizarParametroMeta(evento),
+          },
+          {
+            type: 'text',
+            parameter_name: 'portal_url',
+            text: normalizarParametroMeta(
+              `${CONFIG.portalOrigin}/login.html`
+            ),
+          },
         ],
       }],
     },
   };
+
+  validarPayloadTemplateMeta(payload);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), META.timeoutMs || 20000);

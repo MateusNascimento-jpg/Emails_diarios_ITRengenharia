@@ -8,10 +8,6 @@ function limparNonces(store, agoraMs = Date.now()) {
     if (expiraEm <= agoraMs) store.delete(nonce);
   }
 
-  if (store.size > 5000) {
-    const excedente = store.size - 4000;
-    for (const chave of Array.from(store.keys()).slice(0, excedente)) store.delete(chave);
-  }
 }
 
 function validarAssinaturaPortal({

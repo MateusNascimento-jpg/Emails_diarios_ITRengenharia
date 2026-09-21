@@ -68,9 +68,9 @@ test('envio multipart tenta todas as partes para todos os destinatários', () =>
     const { enviarWhatsAppDaOS } = require('./enviar_whatsapp.js');
 
     const telefones = [
-      '5548988101706',
-      '5567998535699',
-      '5561981558001',
+      '5533000000003',
+      '5522000000002',
+      '5511000000001',
     ];
 
     const linhas = Array.from({ length: 84 }, (_, indice) => ({
@@ -86,7 +86,7 @@ test('envio multipart tenta todas as partes para todos os destinatários', () =>
       const r = await enviarWhatsAppDaOS({
         cliente: {
           clienteId: 'cliente-teste',
-          clienteNome: 'Grupo Aterpa',
+          clienteNome: 'Cliente Exemplo',
           whatsappsEncontrados: telefones,
           whatsappsParaEnvio: telefones,
           whatsappSeguroParaEnvio: true,
@@ -164,12 +164,12 @@ test('lista legada informada pelo usuário permanece apenas em auditoria no modo
           whatsappsEncontrados: [
             '556195648450',
             '5561995648450',
-            '5561981558001',
+            '5511000000001',
           ],
           whatsappsParaEnvio: [
             '556195648450',
             '5561995648450',
-            '5561981558001',
+            '5511000000001',
           ],
           whatsappSeguroParaEnvio: true,
           whatsappDuplicadoEntreClientes: false,

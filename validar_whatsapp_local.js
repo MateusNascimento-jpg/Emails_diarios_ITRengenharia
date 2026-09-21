@@ -26,7 +26,7 @@ const AMBIENTE_WHATSAPP_TESTE = Object.freeze({
   WHATSAPP_ATIVO: 'false',
   WHATSAPP_SIMULAR: 'true',
   WHATSAPP_MODO_TESTE: 'true',
-  WHATSAPP_TEST_NUMBER: '5561999999999',
+  WHATSAPP_TEST_NUMBER: '5511000000001',
   WHATSAPP_PHONE_NUMBER_ID: '123456789012345',
   WHATSAPP_BUSINESS_ACCOUNT_ID: '',
   WHATSAPP_ACCESS_TOKEN: 'TOKEN_LOCAL_NAO_USADO',
@@ -95,7 +95,7 @@ function clienteBase(
       '61999999999',
 
     whatsappsEncontrados: [
-      '5561999999999',
+      '5511000000001',
     ],
 
     whatsappAmbiguo:
@@ -240,7 +240,7 @@ function validarMensagemPequena() {
       },
 
       telefone:
-        '5561999999999',
+        '5511000000001',
     });
 
   assert.equal(
@@ -454,7 +454,7 @@ function validarFallbackCompactoOuBloqueioSeguro() {
 function validarTelefone() {
   const nacional =
     normalizarTelefone(
-      '(61) 99999-9999'
+      '(11) 00000-0001'
     );
 
   assert.equal(
@@ -464,7 +464,7 @@ function validarTelefone() {
 
   assert.equal(
     nacional.telefone,
-    '5561999999999'
+    '5511000000001'
   );
 
   assert.equal(
@@ -476,23 +476,44 @@ function validarTelefone() {
 
   assert.equal(
     normalizarTelefone(
-      '+55 (61) 98155-8001'
+      '+55 (11) 00000-0001'
     ).telefone,
-    '5561981558001'
+    '5511000000001'
   );
 
   assert.equal(
     normalizarTelefone(
-      '0 61 98155-8001'
+      '0 11 00000-0001'
     ).telefone,
-    '5561981558001'
+    '5511000000001'
   );
 
   assert.equal(
     normalizarTelefone(
-      '556798535699'
+      '554400000004'
     ).telefone,
-    '556798535699'
+    '554400000004'
+  );
+
+  assert.equal(
+    normalizarTelefone(
+      '33334444'
+    ).ok,
+    false
+  );
+
+  assert.equal(
+    normalizarTelefone(
+      '+1 415 555 2671'
+    ).telefone,
+    '14155552671'
+  );
+
+  assert.equal(
+    normalizarTelefone(
+      '351912345678'
+    ).ok,
+    false
   );
 }
 
@@ -562,12 +583,12 @@ function validarNumeroBloqueadoNaoDerrubaOsDemais() {
       clienteBase({
         whatsappsEncontrados: [
           '5561988887777',
-          '5561999999999',
+          '5511000000001',
         ],
 
         whatsappsParaEnvio: [
           '5561988887777',
-          '5561999999999',
+          '5511000000001',
         ],
 
         whatsappBloqueado: true,
@@ -590,7 +611,7 @@ function validarNumeroBloqueadoNaoDerrubaOsDemais() {
 
   assert.equal(
     resultado.telefonesCliente[0].telefone,
-    '5561999999999'
+    '5511000000001'
   );
 }
 
@@ -690,7 +711,7 @@ function validarBloqueioContatoAmbiguo() {
           true,
 
         whatsappsEncontrados: [
-          '5561999999999',
+          '5511000000001',
         ],
 
         whatsappSeguroParaEnvio:
@@ -881,7 +902,7 @@ function validarPrioridadeNomeEnsaio() {
       },
 
       telefone:
-        '5561999999999',
+        '5511000000001',
     });
 
   assert.equal(
@@ -934,7 +955,7 @@ function validarPrioridadeNomeEnsaio() {
       },
 
       telefone:
-        '5561999999999',
+        '5511000000001',
     });
 
   assert.equal(
@@ -985,7 +1006,7 @@ function validarPayloadFinalCompativelComMeta() {
       },
 
       telefone:
-        '5561999999999',
+        '5511000000001',
     });
 
   assert.equal(

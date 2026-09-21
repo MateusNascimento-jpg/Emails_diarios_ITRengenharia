@@ -77,3 +77,25 @@ test('mensagem diária mantém a credencial no e-mail e o WhatsApp V3 usa OS e s
     /order_status/
   );
 });
+
+test('payload inválido do Portal é erro definitivo 422 e links são vinculados ao tipo', () => {
+  const server = read('server.js');
+  const notifications = read('security_notifications.js');
+  const validation = read('security_validation.js');
+
+  assert.match(notifications, /status:\s*422/);
+  assert.match(server, /status\(422\)/);
+  assert.match(server, /payload-invalido/);
+  assert.match(validation, /type === 'FIRST_ACCESS'/);
+  assert.match(validation, /\/criar-senha\.html/);
+  assert.match(validation, /\/redefinir-senha\.html/);
+});
+
+test('CLI real exige confirmação explícita e npm run teste não envia', () => {
+  const pkg = JSON.parse(read('package.json'));
+  const envios = read('enviar_todos.js');
+
+  assert.equal(pkg.scripts.teste, 'npm test');
+  assert.match(envios, /--confirmar-producao/);
+  assert.match(envios, /ENVIO REAL BLOQUEADO/);
+});

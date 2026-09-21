@@ -44,41 +44,61 @@ const {
 
 test('três telefones separados por ponto e vírgula são preservados', () => {
   const r = separarTelefonesDetalhado(
-    '5548988101706;5567998535699;5561981558001'
+    '5533000000003;5522000000002;5511000000001'
   );
 
   assert.equal(r.validos.size, 3);
   assert.deepEqual([...r.validos.keys()], [
-    '5548988101706',
-    '5567998535699',
-    '5561981558001',
+    '5533000000003',
+    '5522000000002',
+    '5511000000001',
   ]);
 });
 
 test('normalização aceita formatos brasileiros e internacionais plausíveis', () => {
   assert.equal(
-    normalizarTelefoneContato('+55 (61) 98155-8001').numero,
-    '5561981558001'
+    normalizarTelefoneContato('+55 (11) 00000-0001').numero,
+    '5511000000001'
   );
 
   assert.equal(
-    normalizarTelefoneContato('0 61 98155-8001').numero,
-    '5561981558001'
+    normalizarTelefoneContato('0 11 00000-0001').numero,
+    '5511000000001'
   );
 
   assert.equal(
-    normalizarTelefoneContato('0055 61 98155-8001').numero,
-    '5561981558001'
+    normalizarTelefoneContato('0055 11 00000-0001').numero,
+    '5511000000001'
   );
 
   assert.equal(
-    normalizarTelefoneContato('556798535699').numero,
-    '556798535699'
+    normalizarTelefoneContato('554400000004').numero,
+    '554400000004'
   );
 
   assert.equal(
-    normalizarTelefoneContato('5567998535699').numero,
-    '5567998535699'
+    normalizarTelefoneContato('5522000000002').numero,
+    '5522000000002'
+  );
+
+  assert.equal(
+    normalizarTelefoneContato('33334444').ok,
+    false
+  );
+
+  assert.equal(
+    normalizarTelefoneContato('9 9999-8888').ok,
+    false
+  );
+
+  assert.equal(
+    normalizarTelefoneContato('+1 415 555 2671').numero,
+    '14155552671'
+  );
+
+  assert.equal(
+    normalizarTelefoneContato('351912345678').ok,
+    false
   );
 });
 
@@ -279,9 +299,9 @@ function parametroNomeado(payload, nome) {
 
 test('OS grande é dividida e todas as partes são preparadas para todos os telefones', () => {
   const telefones = [
-    '5548988101706',
-    '5567998535699',
-    '5561981558001',
+    '5533000000003',
+    '5522000000002',
+    '5511000000001',
   ];
 
   const linhas = Array.from({ length: 84 }, (_, indice) => ({
@@ -302,10 +322,10 @@ test('OS grande é dividida e todas as partes são preparadas para todos os tele
   const preparado = prepararEnvioWhatsAppDaOS({
     cliente: {
       clienteId: 'cliente-grupo-aterpa',
-      clienteNome: 'Grupo Aterpa',
+      clienteNome: 'Cliente Exemplo',
       cnpj: '00000000000100',
-      emailPrincipal: 'principal@aterpa.com.br',
-      emails: ['principal@aterpa.com.br', 'obra@aterpa.com.br'],
+      emailPrincipal: 'principal@cliente-exemplo.test',
+      emails: ['principal@cliente-exemplo.test', 'obra@cliente-exemplo.test'],
       whatsappsEncontrados: telefones,
       whatsappsParaEnvio: telefones,
       whatsappDuplicadoEntreClientes: true,
@@ -367,12 +387,12 @@ test('lista legada não remove destinos da preparação quando bloqueio rígido 
       whatsappsEncontrados: [
         '5561988887777',
         '5561999999999',
-        '5548988101706',
+        '5533000000003',
       ],
       whatsappsParaEnvio: [
         '5561988887777',
         '5561999999999',
-        '5548988101706',
+        '5533000000003',
       ],
       whatsappSeguroParaEnvio: true,
       whatsappMotivosBloqueio: [],

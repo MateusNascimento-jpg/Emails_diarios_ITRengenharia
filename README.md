@@ -1,74 +1,83 @@
 # ITR Notificações — E-mail, WhatsApp e Segurança do Portal
 
-Serviço Node.js da ITR Engenharia para:
+Serviço Node.js da ITR Engenharia para envio diário de atualizações por Ordem de Serviço, WhatsApp Cloud API, notificações de segurança do Portal ITR e webhook da Meta.
 
-- enviar o resumo diário por Ordem de Serviço;
-- disparar WhatsApp a partir de template aprovado;
-- receber notificações transacionais fechadas do Portal ITR;
-- aplicar HMAC, timestamp e nonce no canal Portal → Notificações;
-- auditar números de WhatsApp compartilhados sem bloquear por padrão;
-- oferecer idempotência persistente opcional no Airtable.
+Versão deste pacote: **2.3.1**.
 
-Versão deste pacote: **2.2.1**.
+## Estado operacional da 2.3.1
 
-## Antes de iniciar
+- WhatsApp diário V3: `atualizacao_ordem_servico_v3`, `pt_BR`, parâmetros nomeados `order_service` e `order_status`.
+- Uma mensagem de WhatsApp por OS por telefone no V3, independentemente da quantidade de linhas da OS.
+- Cabeçalho IMAGE suportado por `WHATSAPP_TEMPLATE_HEADER_MEDIA_ID` ou `WHATSAPP_TEMPLATE_HEADER_MEDIA_URL`.
+- E-mail individual por destinatário, sem expor a lista de outros destinatários.
+- Destinatários de e-mail são consolidados por OS; contatos globais do cliente só entram como fallback quando a OS não possui e-mail válido.
+- Idempotência persistente no Airtable é obrigatória para o modo de produção recomendado.
+- Falhas globais de autenticação SMTP ou Meta interrompem o respectivo canal na execução corrente.
+- Shutdown gracioso aguarda o lote em andamento dentro de um orçamento configurável.
+- Execução direta de produção via terminal exige `--confirmar-producao`.
+- `npm run teste` executa apenas a suíte de testes; não envia mensagens.
 
-1. Use Node.js 20 ou superior.
-2. Rode `npm ci`.
-3. Copie `.env.example` para `.env` somente no ambiente local.
-4. Preserve os valores reais já existentes do ambiente.
-5. Rode:
+## Instalação
+
+Use Node.js 20 ou 22. Em produção, mantenha uma versão controlada pelo ambiente de deploy.
 
 ```bash
-npm run preflight
+npm ci
 npm test
+npm run preflight
 ```
 
-O serviço também valida configuração crítica no startup.
-
-A 2.2.1 mantém as regras da 2.2.0 e adiciona entrega resiliente para listas grandes de WhatsApp e contatos heterogêneos.
-
-### Regras 2.2.1 — contatos, destinatários e mensagens grandes
-
-- cada telefone válido é processado independentemente;
-- um telefone inválido/bloqueado não derruba os demais números válidos do cliente;
-- números compartilhados entre clientes geram aviso de auditoria e são permitidos; o mesmo número pode receber notificações de clientes diferentes quando estiver cadastrado nos dois;
-- são aceitos formatos comuns com `+55`, `0055`, `0 + DDD`, parênteses, espaços e hífens;
-- `;`, `,`, `|`, `/` e quebra de linha podem separar múltiplos telefones;
-- OS grandes que excedem o limite de um único template são divididas automaticamente em partes, sem descartar os itens;
-- cada telefone recebe todas as partes da OS; uma falha em um destino não impede as tentativas dos demais;
-- `WHATSAPP_NUMEROS_BLOQUEADOS` funciona como lista de auditoria por padrão; para torná-la bloqueio efetivo, configure `WHATSAPP_BLOQUEIO_RIGIDO_NUMEROS=true`;
-- `WHATSAPP_PAUSA_ENTRE_MENSAGENS_MS` controla a pausa curta entre partes/destinatários, sem alterar o cron;
-- cada e-mail cadastrado recebe uma mensagem individual, sem expor os outros destinatários;
-- o primeiro e-mail consolidado do Airtable é o contato principal e é o único que recebe a senha inicial legada;
-- destinatários secundários recebem a mesma atualização do cliente, mas sem a senha inicial do contato principal;
-- falhas finais da Meta recebidas pelo webhook ficam detalhadas nos logs e nas falhas recentes do `/status`.
-
-A 2.2.1 também mantém os bloqueios de configuração crítica:
-
-- valores residuais como `<PREENCHER>`, `CHANGEME`, `TODO` e `TBD`;
-- nomes de campos do Airtable com sinais de encoding corrompido;
-- `CHAVE_DISPARO_MANUAL` fraca quando configurada.
-
-### Regra importante: `EMAIL_MODO_TESTE`
-
-- vazio: envia para os destinatários reais;
-- um e-mail válido: redireciona todos os envios para esse endereço;
-- `false`, `true`, `0`, `1` ou qualquer texto que não seja e-mail: **configuração inválida e o serviço não inicia**.
+O serviço valida configuração crítica no startup e o CI executa `npm ci`, `npm test` e auditoria de dependências de produção.
 
 ## Automação diária
 
-O cron padrão roda às 8h em `America/Sao_Paulo` e usa os registros permitidos pela configuração do Airtable.
-
-`AUTOMACAO_INICIO_EM` é obrigatório quando `CRON_ATIVO=true` e deve conter data/hora ISO-8601 com fuso explícito, por exemplo:
+O cron padrão roda às 08:00 no fuso `America/Sao_Paulo`:
 
 ```text
-2026-08-01T00:00:00-03:00
+CRON_ATIVO=true
+CRON_HORARIO=0 8 * * *
+APP_TIMEZONE=America/Sao_Paulo
 ```
 
-`ignorarData=true` não ignora automaticamente esse marco de segurança.
+A regra funcional continua sendo processar registros cuja `Data da Última Atualização Update` pertence ao dia anterior. `AUTOMACAO_INICIO_EM` impede envios retroativos anteriores ao marco operacional.
 
-## Portal ITR — notificações de segurança
+> Observação arquitetural: a 2.3.1 mantém a semântica de "ontem" para evitar alterar silenciosamente o conjunto de clientes que receberão mensagens. Recuperação persistente de dias inteiros perdidos exige uma marca d'água armazenada fora do processo e deve ser implementada como mudança operacional própria.
+
+## WhatsApp V3
+
+Configuração esperada:
+
+```text
+WHATSAPP_ATIVO=true
+WHATSAPP_SIMULAR=false
+WHATSAPP_MODO_TESTE=false
+WHATSAPP_TEMPLATE_NAME=atualizacao_ordem_servico_v3
+WHATSAPP_TEMPLATE_LANGUAGE=pt_BR
+WHATSAPP_TEMPLATE_PARAMETER_MODE=named
+WHATSAPP_TEMPLATE_BODY_PARAMETERS=order_service,order_status
+WHATSAPP_TEMPLATE_HEADER_TYPE=image
+WHATSAPP_TEMPLATE_HEADER_MEDIA_URL=https://notificacoes.itr.eng.br/assets/logo-whatsapp.jpeg
+WHATSAPP_TEMPLATE_BUTTONS=
+```
+
+O botão estático do Portal pertence ao template aprovado na Meta e não precisa ser enviado em `WHATSAPP_TEMPLATE_BUTTONS`.
+
+Estados da OS no V3:
+
+- `Aguardando Preparação` → `Amostra recebida`;
+- `Enviado ao Cliente` → `Relatório Pronto`;
+- ambos → `Amostra recebida e Relatório Pronto`.
+
+## E-mail diário
+
+- Um e-mail separado por destinatário válido.
+- Assunto: `ITR Engenharia — Atualização da ordem de serviço {OS}`.
+- Exibe CNPJ formatado, Portal do Cliente e e-mail cadastrado para primeiro acesso conforme a regra atual do Portal.
+- O primeiro e-mail válido da própria OS define o e-mail de primeiro acesso.
+
+A credencial inicial baseada em e-mail é uma regra legada do Portal. A migração definitiva recomendada é primeiro acesso por token de uso único/expiração; isso é uma decisão de autenticação do Portal, não uma alteração isolada deste serviço.
+
+## Segurança do Portal
 
 Endpoint interno:
 
@@ -76,121 +85,98 @@ Endpoint interno:
 POST /internal/portal/security-notification
 ```
 
-Tipos aceitos:
-
-- `FIRST_ACCESS`
-- `PASSWORD_RESET`
-- `PASSWORD_CREATED`
-- `PASSWORD_CHANGED`
-
-O endpoint não aceita HTML arbitrário. Links de primeiro acesso/reset precisam ser HTTPS, permanecer na origem configurada em `PORTAL_ORIGIN` e usar as páginas permitidas do Portal.
-
-A autenticação entre serviços usa:
+Autenticação:
 
 - HMAC-SHA256;
 - timestamp curto;
-- nonce de uso único no processo;
+- nonce de uso único durante a vida do processo;
 - comparação em tempo constante.
 
-O mesmo segredo Base64 de 32+ bytes deve existir em:
+Tipos aceitos:
 
-```text
-Notificações: PORTAL_INTERNAL_HMAC_SECRET
-Portal:       PORTAL_NOTIFICATIONS_HMAC_SECRET
-```
+- `FIRST_ACCESS` → somente `/criar-senha.html#...`;
+- `PASSWORD_RESET` → somente `/redefinir-senha.html#...`;
+- `PASSWORD_CREATED`;
+- `PASSWORD_CHANGED`.
 
-## WhatsApp de segurança
+Payload inválido retorna `422 payload-invalido`. Falha real de infraestrutura continua retornando 503.
 
-O alerta por WhatsApp é opcional. Ele **não recebe token nem link de redefinição**.
+Em `NODE_ENV=production`, `EMAIL_MODO_TESTE` não pode permanecer ativo enquanto o endpoint interno do Portal estiver configurado.
 
-Quando:
+## Telefone
 
-```text
-WHATSAPP_MODO_TESTE=true
-```
+A normalização fica centralizada em `lib/telefone.js`:
 
-as notificações de segurança usam `WHATSAPP_TEST_NUMBER`, assim como o fluxo diário. Elas não usam o telefone real do cliente durante o modo teste.
-
-## Health e status
-
-Health público e mínimo:
-
-```text
-GET /health
-```
-
-Resposta esperada:
-
-```text
-OK
-```
-
-`/status` contém telemetria operacional e exige autenticação:
-
-```bash
-curl -H "X-API-Key: SUA_CHAVE" https://SEU-SERVICO/status
-```
-
-Também é aceito:
-
-```text
-Authorization: Bearer SUA_CHAVE
-```
-
-A chave não é aceita por query string.
-
-## Disparo manual
-
-Use POST e envie a chave em header:
-
-```bash
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: SUA_CHAVE" \
-  -d '{"ignorarData":false}' \
-  https://SEU-SERVICO/disparar-agora
-```
-
-Para teste controlado sem filtro diário:
-
-```json
-{"ignorarData":true}
-```
-
-`PERMITIR_DISPARO_MANUAL_GET` deve permanecer `false` em produção.
+- `+` e `00` preservam o caráter internacional;
+- DDD + número brasileiro recebe `55`;
+- número nacional sem DDD é rejeitado;
+- número estrangeiro sem `+`/`00` não é adivinhado;
+- formato final segue E.164 plausível.
 
 ## Idempotência
 
-A proteção persistente existe, mas é deliberadamente explícita:
+Produção recomendada:
 
 ```text
-IDEMPOTENCIA_ATIVA=false
+IDEMPOTENCIA_ATIVA=true
+IDEMPOTENCIA_FALHAR_FECHADO=true
+IDEMPOTENCIA_RESERVA_TTL_MINUTOS=30
 ```
 
-Só ative depois de confirmar que os campos de idempotência existem na tabela de OS. Com a funcionalidade ativada, mantenha `IDEMPOTENCIA_FALHAR_FECHADO=true`.
+Os campos de idempotência ficam na tabela `Ordem de Serviço`. Estado `incerto` permanece fail-closed de propósito para evitar duplicação quando não é possível provar se uma entrega ocorreu.
 
-## Logs e privacidade
+## Disparo manual
 
-O fluxo de e-mail mascara destinatários nos logs. Não registre tokens, senhas, HMACs, payloads sensíveis ou `.env` em tickets, commits ou conversas.
+`POST /disparar-agora` autentica por `X-API-Key` ou `Authorization: Bearer`. A resposta é `202 Accepted` e o andamento fica em `/status`.
 
-## Scripts principais
+`GET /disparar-agora` deve permanecer desativado em produção:
 
 ```text
-npm start                 inicia o serviço
-npm run preflight         valida configuração sem exibir segredos
-npm run verificar         node --check nos módulos
-npm run test:security     testes de segurança/hardening
-npm test                  sintaxe + segurança + validadores locais
-npm run audit:local       sintaxe + segurança + preflight
-npm run enviar            execução normal
-npm run teste             execução com ignorarData
+PERMITIR_DISPARO_MANUAL_GET=false
 ```
 
-## Produção
+Execução pelo terminal:
 
-- `.env` e `node_modules` não devem ser versionados;
-- use `npm ci` no build/deploy;
-- use `/health` para monitoramento externo;
-- mantenha `/status` autenticado;
-- mantenha `PERMITIR_DISPARO_MANUAL_GET=false`;
-- não ative WhatsApp de segurança sem template aprovado e teste controlado.
+```bash
+# normal, só quando houver intenção explícita de envio real
+node enviar_todos.js --confirmar-producao
+
+# histórico, também exige confirmação quando o ambiente estiver em modo real
+node enviar_todos.js --ignorar-data --confirmar-producao
+```
+
+## Scripts
+
+```text
+npm start                       inicia o serviço
+npm run preflight               valida a configuração sem exibir segredos
+npm run verificar               node --check nos módulos
+npm run test:security           testes de segurança/hardening
+npm test                        suíte completa + validadores locais
+npm run teste                   alias seguro de npm test
+npm run validar:airtable        valida regras Airtable sem acessar o Airtable real
+npm run validar:whatsapp        valida WhatsApp sem chamar a Meta
+npm run validar:idempotencia    valida idempotência sem escrever no Airtable real
+npm run validar:v3              valida contratos do V3
+npm run enviar                  execução CLI; em produção exige --confirmar-producao
+npm run enviar:historico        execução histórica; em produção exige --confirmar-producao
+```
+
+## Health, status e webhook
+
+```text
+GET/HEAD /health
+GET/HEAD /status                  autenticado
+GET/POST /webhook/whatsapp
+GET /assets/logo-whatsapp.jpeg
+```
+
+O webhook valida `X-Hub-Signature-256` sobre o corpo bruto quando `WHATSAPP_WEBHOOK_VALIDAR_ASSINATURA=true`.
+
+## Privacidade e repositório
+
+- `.env` e `node_modules` não são versionados;
+- segredos não devem aparecer em commits, logs ou tickets;
+- fixtures de teste usam dados fictícios;
+- números e e-mails são mascarados nos logs operacionais;
+- a rota `/status` é autenticada.

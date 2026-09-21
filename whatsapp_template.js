@@ -939,11 +939,25 @@ function quebrarTextoSeguro(
       ', ',
       ' ',
     ]) {
-      const indice =
+      const indiceUtf16 =
         janela.lastIndexOf(
-          separador,
-          maximo
+          separador
         );
+
+      const indice =
+        indiceUtf16 < 0
+          ? -1
+          : Array.from(
+              janela.slice(
+                0,
+                indiceUtf16
+              )
+            ).length;
+
+      const tamanhoSeparador =
+        Array.from(
+          separador
+        ).length;
 
       if (
         indice >= Math.floor(
@@ -952,7 +966,7 @@ function quebrarTextoSeguro(
       ) {
         corte =
           indice +
-          separador.length;
+          tamanhoSeparador;
         break;
       }
     }

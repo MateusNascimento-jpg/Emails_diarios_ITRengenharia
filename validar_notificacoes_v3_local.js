@@ -39,7 +39,7 @@ function clienteBase() {
   return {
     clienteId: 'cliente-v3',
     clienteNome: 'Cliente de Validação',
-    cnpj: '17162983005124',
+    cnpj: '12345678000100',
 
     // Simula um principal global antigo/incorreto para provar que
     // a OS passa a usar o primeiro e-mail do record da própria OS.
@@ -56,7 +56,7 @@ function clienteBase() {
 function ordemBase() {
   return {
     osId: 'os-v3',
-    osNome: 'Agregados - Aterpa',
+    osNome: 'OS-EXEMPLO-V3',
 
     emails: [
       'primeiro.record@exemplo.com.br',
@@ -117,7 +117,7 @@ function validarWhatsapp() {
 
   assert.equal(
     parametroCorpo(payload, 'order_service')?.text,
-    'Agregados - Aterpa'
+    'OS-EXEMPLO-V3'
   );
 
   assert.equal(
@@ -160,7 +160,7 @@ function validarEmail() {
 
     assert.match(
       mensagem.assunto,
-      /Atualização da ordem de serviço Agregados - Aterpa/
+      /Atualização da ordem de serviço OS-EXEMPLO-V3/
     );
 
     assert.match(
@@ -180,7 +180,7 @@ function validarEmail() {
 
     assert.match(
       mensagem.html,
-      /17\.162\.983\/0051-24/
+      /12\.345\.678\/0001-00/
     );
 
     assert.match(

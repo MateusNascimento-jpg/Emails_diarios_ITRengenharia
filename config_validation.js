@@ -84,6 +84,8 @@ function validarConfiguracao(env = process.env, { estrito = true } = {}) {
   const whatsappAtivo = booleano(env, 'WHATSAPP_ATIVO', false);
   const whatsappSimular = booleano(env, 'WHATSAPP_SIMULAR', true);
   const whatsappModoTeste = booleano(env, 'WHATSAPP_MODO_TESTE', true);
+  const whatsappExigirEmailEnviado =
+    booleano(env, 'WHATSAPP_EXIGIR_EMAIL_ENVIADO', true);
   const portalWhatsappAtivo = booleano(env, 'PORTAL_SECURITY_WHATSAPP_ENABLED', false);
   const webhookValidarAssinatura = booleano(env, 'WHATSAPP_WEBHOOK_VALIDAR_ASSINATURA', true);
   const permitirGetManual = booleano(env, 'PERMITIR_DISPARO_MANUAL_GET', false);
@@ -114,6 +116,16 @@ function validarConfiguracao(env = process.env, { estrito = true } = {}) {
   const modoTesteEmail = texto(env, 'EMAIL_MODO_TESTE');
   if (modoTesteEmail && !emailValido(modoTesteEmail)) {
     erros.push('EMAIL_MODO_TESTE deve ficar vazio ou conter um e-mail válido. Não use false/true/0/1.');
+  }
+
+  if (
+    texto(env, 'NODE_ENV').toLowerCase() === 'production' &&
+    modoTesteEmail &&
+    texto(env, 'PORTAL_INTERNAL_HMAC_SECRET')
+  ) {
+    erros.push(
+      'EMAIL_MODO_TESTE não pode ficar ativo em produção enquanto o endpoint de segurança do Portal estiver configurado.'
+    );
   }
 
   const smtpNecessario = emailAtivo || Boolean(texto(env, 'PORTAL_INTERNAL_HMAC_SECRET'));
@@ -155,16 +167,16 @@ function validarConfiguracao(env = process.env, { estrito = true } = {}) {
       erros.push('AUTOMACAO_INICIO_EM deve ser ISO-8601 com fuso explícito, por exemplo 2026-08-01T00:00:00-03:00.');
     }
 
-    for (const nome of ['AIRTABLE_TOKEN', 'AIRTABLE_BASE_ID']) {
+    for (const nome of ['AIRTABLE_TOKEN', 'AIRTABLE_BASE_ID', 'AIRTABLE_TABLE_ID']) {
       if (!texto(env, nome)) erros.push(`${nome} é obrigatório quando CRON_ATIVO=true.`);
     }
   }
 
   if (!texto(env, 'AIRTABLE_TABLE_ID')) {
-    avisos.push('AIRTABLE_TABLE_ID não foi definido; o código usará o ID padrão embutido. Prefira configurá-lo explicitamente em produção.');
+    avisos.push('AIRTABLE_TABLE_ID não foi definido; o fluxo diário não poderá consultar a tabela de trabalhos.');
   }
   if (!texto(env, 'AIRTABLE_OS_TABLE_ID')) {
-    avisos.push('AIRTABLE_OS_TABLE_ID não foi definido; a idempotência usará o ID padrão embutido. Prefira configurá-lo explicitamente em produção.');
+    avisos.push('AIRTABLE_OS_TABLE_ID não foi definido; a idempotência persistente não poderá operar.');
   }
 
   if (whatsappAtivo && whatsappSimular) {
@@ -178,6 +190,45 @@ function validarConfiguracao(env = process.env, { estrito = true } = {}) {
     if (whatsappModoTeste && !texto(env, 'WHATSAPP_TEST_NUMBER')) {
       erros.push('WHATSAPP_TEST_NUMBER é obrigatório quando WHATSAPP_MODO_TESTE=true.');
     }
+
+    if (!idempotenciaAtiva) {
+      const mensagem =
+        'WhatsApp real está habilitado sem IDEMPOTENCIA_ATIVA=true.';
+      if (estrito) erros.push(mensagem); else avisos.push(mensagem);
+    }
+
+    const headerType =
+      texto(env, 'WHATSAPP_TEMPLATE_HEADER_TYPE', 'none').toLowerCase();
+
+    if (
+      ['image', 'video', 'document'].includes(headerType) &&
+      !texto(env, 'WHATSAPP_TEMPLATE_HEADER_MEDIA_ID') &&
+      !texto(env, 'WHATSAPP_TEMPLATE_HEADER_MEDIA_URL')
+    ) {
+      erros.push(
+        `WHATSAPP_TEMPLATE_HEADER_TYPE=${headerType} exige WHATSAPP_TEMPLATE_HEADER_MEDIA_ID ou WHATSAPP_TEMPLATE_HEADER_MEDIA_URL.`
+      );
+    }
+
+    const mediaUrl =
+      texto(env, 'WHATSAPP_TEMPLATE_HEADER_MEDIA_URL');
+
+    if (
+      mediaUrl &&
+      !urlHttpsValida(mediaUrl)
+    ) {
+      erros.push('WHATSAPP_TEMPLATE_HEADER_MEDIA_URL deve ser uma URL HTTPS válida.');
+    }
+  }
+
+  if (
+    whatsappAtivo &&
+    whatsappExigirEmailEnviado &&
+    !emailAtivo
+  ) {
+    const mensagem =
+      'WHATSAPP_EXIGIR_EMAIL_ENVIADO=true com EMAIL_ATIVO=false impede todos os WhatsApps do fluxo diário.';
+    if (estrito) erros.push(mensagem); else avisos.push(mensagem);
   }
 
   if (portalWhatsappAtivo) {
@@ -201,7 +252,7 @@ function validarConfiguracao(env = process.env, { estrito = true } = {}) {
   }
 
   if (idempotenciaAtiva && !texto(env, 'AIRTABLE_OS_TABLE_ID')) {
-    avisos.push('IDEMPOTENCIA_ATIVA=true sem AIRTABLE_OS_TABLE_ID explícito: será usado o ID padrão embutido.');
+    erros.push('IDEMPOTENCIA_ATIVA=true exige AIRTABLE_OS_TABLE_ID explícito.');
   }
   if (!idempotenciaAtiva) {
     avisos.push('IDEMPOTENCIA_ATIVA=false: a proteção persistente contra reenvio está desativada.');
@@ -218,6 +269,7 @@ function validarConfiguracao(env = process.env, { estrito = true } = {}) {
       whatsappAtivo,
       whatsappSimular,
       whatsappModoTeste,
+      whatsappExigirEmailEnviado,
       portalHmacConfigurado: Boolean(segredoPortal),
       portalWhatsappAtivo,
       idempotenciaAtiva,

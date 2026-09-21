@@ -145,7 +145,7 @@ const CONFIG = Object.freeze({
 
   tabelaOsId: textoEnv(
     'AIRTABLE_OS_TABLE_ID',
-    'tblg3yHLdrpYVUNPv'
+    ''
   ),
 
   timeoutMs: inteiroPositivo(

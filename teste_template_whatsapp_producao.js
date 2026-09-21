@@ -1,7 +1,10 @@
 'use strict';
 
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
+const {
+  normalizarTelefoneE164,
+} = require('./lib/telefone.js');
 
 const ARGUMENTO_ENVIO_REAL =
   '--confirmar-envio-real';
@@ -69,27 +72,18 @@ function normalizarTelefone(
   valor,
   codigoPais = '55'
 ) {
-  let numero =
-    somenteDigitos(
-      valor
+  const resultado =
+    normalizarTelefoneE164(
+      valor,
+      codigoPais
     );
 
-  if (
-    numero.length === 10 ||
-    numero.length === 11
-  ) {
-    numero =
-      `${codigoPais}${numero}`;
-  }
-
   exigir(
-    /^[1-9][0-9]{7,14}$/.test(
-      numero
-    ),
+    resultado.ok,
     'WHATSAPP_TEST_NUMBER está vazio ou inválido.'
   );
 
-  return numero;
+  return resultado.telefone;
 }
 
 function mascararTelefone(

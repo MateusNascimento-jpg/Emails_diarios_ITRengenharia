@@ -31,6 +31,25 @@ if (!LOGO_EXISTE) {
 
 let transporte = null;
 
+function inteiroPositivoEnv(
+  nome,
+  padrao
+) {
+  const numero = Number.parseInt(
+    String(
+      process.env[nome] ?? ''
+    ),
+    10
+  );
+
+  return (
+    Number.isInteger(numero) &&
+    numero > 0
+  )
+    ? numero
+    : padrao;
+}
+
 function criarTransporte() {
   const host = String(process.env.SMTP_HOST || '').trim();
   const port = Number(process.env.SMTP_PORT || 587);
@@ -49,6 +68,32 @@ function criarTransporte() {
     host,
     port,
     secure: port === 465,
+    pool: true,
+    maxConnections:
+      inteiroPositivoEnv(
+        'SMTP_MAX_CONNECTIONS',
+        3
+      ),
+    maxMessages:
+      inteiroPositivoEnv(
+        'SMTP_MAX_MESSAGES_POR_CONEXAO',
+        100
+      ),
+    connectionTimeout:
+      inteiroPositivoEnv(
+        'SMTP_CONNECTION_TIMEOUT_MS',
+        15000
+      ),
+    greetingTimeout:
+      inteiroPositivoEnv(
+        'SMTP_GREETING_TIMEOUT_MS',
+        10000
+      ),
+    socketTimeout:
+      inteiroPositivoEnv(
+        'SMTP_SOCKET_TIMEOUT_MS',
+        60000
+      ),
     auth: { user, pass },
   });
 }

@@ -14,10 +14,15 @@ function actionUrlValida(type, valor, portalOrigin) {
     const u = new URL(String(valor || ''));
     const origem = new URL(String(portalOrigin || ''));
 
+    const caminhoEsperado =
+      type === 'FIRST_ACCESS'
+        ? '/criar-senha.html'
+        : '/redefinir-senha.html';
+
     return (
       u.protocol === 'https:' &&
       u.origin === origem.origin &&
-      ['/criar-senha.html', '/redefinir-senha.html'].includes(u.pathname) &&
+      u.pathname === caminhoEsperado &&
       Boolean(u.hash)
     );
   } catch (_) {

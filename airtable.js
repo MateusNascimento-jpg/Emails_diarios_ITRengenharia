@@ -31,6 +31,10 @@ require('dotenv').config({
   quiet: true,
 });
 
+const {
+  normalizarTelefoneE164,
+} = require('./lib/telefone.js');
+
 // ============================================================
 // FUNÇÕES DE CONFIGURAÇÃO
 // ============================================================
@@ -144,7 +148,7 @@ const AIRTABLE_BASE_ID = campoEnv(
 
 const AIRTABLE_TABLE_ID = campoEnv(
   'AIRTABLE_TABLE_ID',
-  'tblJAP4Av9sWm8SmL'
+  ''
 );
 
 const AIRTABLE_VIEW_ID = campoEnv(
@@ -360,6 +364,19 @@ const CAMPOS = Object.freeze({
     'Data da Última Atualização Update'
   ),
 });
+
+const CAMPOS_CONSULTA =
+  Object.freeze(
+    [
+      ...new Set(
+        Object.values(CAMPOS)
+          .map(item =>
+            String(item || '')
+          )
+          .filter(Boolean)
+      ),
+    ]
+  );
 
 // ============================================================
 // FUNÇÕES AUXILIARES
@@ -602,80 +619,17 @@ function normalizarTelefoneContato(
   codigoPaisPadrao =
     CODIGO_PAIS_PADRAO
 ) {
-  const original = String(
-    valor ?? ''
-  ).trim();
-
-  if (!original) {
-    return {
-      ok: false,
-      motivo: 'telefone-vazio',
-      original,
-      numero: '',
-    };
-  }
-
-  let numero = original.replace(
-    /\D/g,
-    ''
-  );
-
-  if (numero.startsWith('00')) {
-    numero = numero.slice(2);
-  }
-
-  // Aceita o zero de tronco nacional, ex.: 0 61 99999-9999.
-  if (
-    numero.startsWith('0') &&
-    (numero.length === 11 || numero.length === 12)
-  ) {
-    const semZero = numero.slice(1);
-
-    if (
-      semZero.length === 10 ||
-      semZero.length === 11
-    ) {
-      numero = semZero;
-    }
-  }
-
-  // Aceita 55 0 DDD número.
-  if (
-    codigoPaisPadrao === '55' &&
-    numero.startsWith('550') &&
-    (numero.length === 13 || numero.length === 14)
-  ) {
-    numero = `55${numero.slice(3)}`;
-  }
-
-  // DDD + telefone brasileiro (fixo ou móvel).
-  if (
-    codigoPaisPadrao &&
-    (
-      numero.length === 10 ||
-      numero.length === 11
-    )
-  ) {
-    numero =
-      `${codigoPaisPadrao}${numero}`;
-  }
-
-  // A Meta é a autoridade final sobre a existência do destino.
-  // Aqui só exigimos um formato internacional plausível.
-  if (!/^[1-9]\d{7,14}$/.test(numero)) {
-    return {
-      ok: false,
-      motivo: 'telefone-invalido',
-      original,
-      numero,
-    };
-  }
+  const resultado =
+    normalizarTelefoneE164(
+      valor,
+      codigoPaisPadrao
+    );
 
   return {
-    ok: true,
-    motivo: '',
-    original,
-    numero,
+    ok: resultado.ok,
+    motivo: resultado.motivo,
+    original: resultado.original,
+    numero: resultado.telefone,
   };
 }
 
@@ -1089,56 +1043,71 @@ async function requisitarAirtable(
         }
       );
 
-      if (resposta.ok) {
-        return resposta;
-      }
-
+      // Lê o corpo ainda sob o mesmo AbortController. Assim o timeout
+      // cobre cabeçalhos + download + parse, e não apenas o handshake.
       const corpo =
         await resposta.text();
 
-      ultimoErro = new Error(
-        `Airtable respondeu HTTP ` +
-        `${resposta.status}: ` +
-        `${corpo.slice(0, 1000)}`
-      );
-
-      const podeRepetir =
-        erroPodeSerTemporario(
-          resposta.status
+      if (!resposta.ok) {
+        ultimoErro = new Error(
+          `Airtable respondeu HTTP ` +
+          `${resposta.status}: ` +
+          `${corpo.slice(0, 1000)}`
         );
 
-      if (
-        !podeRepetir ||
-        tentativa ===
-          AIRTABLE_MAX_TENTATIVAS
-      ) {
-        throw ultimoErro;
+        const podeRepetir =
+          erroPodeSerTemporario(
+            resposta.status
+          );
+
+        if (
+          !podeRepetir ||
+          tentativa ===
+            AIRTABLE_MAX_TENTATIVAS
+        ) {
+          throw ultimoErro;
+        }
+
+        const retryAfter = Number(
+          resposta.headers.get(
+            'retry-after'
+          )
+        );
+
+        const espera =
+          (
+            Number.isFinite(retryAfter) &&
+            retryAfter > 0
+          )
+            ? retryAfter * 1000
+            : 800 * tentativa;
+
+        console.warn(
+          `[Airtable] HTTP ` +
+          `${resposta.status}. ` +
+          `Nova tentativa em ` +
+          `${espera} ms ` +
+          `(${tentativa}/` +
+          `${AIRTABLE_MAX_TENTATIVAS}).`
+        );
+
+        await dormir(espera);
+        continue;
       }
 
-      const retryAfter = Number(
-        resposta.headers.get(
-          'retry-after'
-        )
-      );
+      let dados;
 
-      const espera =
-        (
-          Number.isFinite(retryAfter) &&
-          retryAfter > 0
-        )
-          ? retryAfter * 1000
-          : 800 * tentativa;
+      try {
+        dados = corpo
+          ? JSON.parse(corpo)
+          : {};
+      } catch {
+        throw new Error(
+          'O Airtable retornou uma resposta que não é JSON.'
+        );
+      }
 
-      console.warn(
-        `[Airtable] HTTP ` +
-        `${resposta.status}. ` +
-        `Nova tentativa em ` +
-        `${espera} ms ` +
-        `(${tentativa}/` +
-        `${AIRTABLE_MAX_TENTATIVAS}).`
-      );
-
-      await dormir(espera);
+      return dados;
     } catch (erro) {
       ultimoErro =
         erro?.name === 'AbortError'
@@ -1227,6 +1196,15 @@ async function buscarRegistrosDaView() {
           String(AIRTABLE_PAGE_SIZE),
       });
 
+    // Evita transferir anexos e dezenas de campos não utilizados.
+    // O filtro continua podendo referenciar outros campos no Airtable.
+    for (const campo of CAMPOS_CONSULTA) {
+      parametros.append(
+        'fields[]',
+        campo
+      );
+    }
+
     if (AIRTABLE_VIEW_ID) {
       parametros.set(
         'view',
@@ -1258,21 +1236,11 @@ async function buscarRegistrosDaView() {
       )}?` +
       parametros.toString();
 
-    const resposta =
+    const dados =
       await requisitarAirtable(
         url,
         headers
       );
-
-    let dados;
-
-    try {
-      dados = await resposta.json();
-    } catch {
-      throw new Error(
-        'O Airtable retornou uma resposta que não é JSON.'
-      );
-    }
 
     if (!Array.isArray(dados.records)) {
       throw new Error(

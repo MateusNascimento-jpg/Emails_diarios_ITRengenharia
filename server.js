@@ -116,6 +116,11 @@ const CONFIG = Object.freeze({
     900000
   ),
 
+  shutdownTimeoutMs: numeroInteiroPositivo(
+    process.env.SERVIDOR_SHUTDOWN_TIMEOUT_MS,
+    25000
+  ),
+
   portalInternalHmacSecret: textoEnv(
     'PORTAL_INTERNAL_HMAC_SECRET'
   ),
@@ -982,7 +987,24 @@ app.post(
       return res.status(200).json(resultado);
     } catch (erro) {
       console.error(`[Portal Segurança] Falha na notificação: ${erro.message}`);
-      return res.status(503).json({ ok:false, motivo:'notification-unavailable' });
+
+      if (erro?.status === 422) {
+        return res
+          .status(422)
+          .json({
+            ok: false,
+            motivo: 'payload-invalido',
+          });
+      }
+
+      return res
+        .status(503)
+        .json({
+          ok: false,
+          motivo: erro?.code === 'SECURITY_EMAIL_TEST_MODE_ACTIVE'
+            ? 'modo-teste-email-ativo'
+            : 'notification-unavailable',
+        });
     }
   }
 );
@@ -996,13 +1018,6 @@ app.use(
   express.json({
     limit: CONFIG.jsonLimite,
     strict: true,
-  })
-);
-
-app.use(
-  express.urlencoded({
-    extended: false,
-    limit: CONFIG.jsonLimite,
   })
 );
 
@@ -1183,49 +1198,38 @@ async function rotaDisparoManual(req, res) {
   const ignorarData =
     extrairIgnorarData(req);
 
-  try {
-    const resultado =
-      await executarControlado({
-        origem:
-          req.method === 'POST'
-            ? 'manual-post'
-            : 'manual-get',
+  const origem =
+    req.method === 'POST'
+      ? 'manual-post'
+      : 'manual-get';
 
-        ignorarData,
-      });
+  // Inicia o processamento e responde imediatamente. O andamento e o
+  // resultado final ficam disponíveis em /status. Isso evita manter uma
+  // conexão HTTP aberta durante todo o lote.
+  const execucao =
+    executarControlado({
+      origem,
+      ignorarData,
+    });
 
-    return res
-      .status(200)
-      .json({
-        ok:
-          resultado?.ok !== false,
-
-        executado:
-          resultado?.executado !== false,
-
-        ignorarData,
-
-        resultado:
-          resumoSeguro(resultado),
-      });
-  } catch (erro) {
+  execucao.catch(erro => {
     console.error(
-      `[Servidor] Falha no disparo manual: ` +
+      `[Servidor] Falha no disparo manual em segundo plano: ` +
       `${erro?.message || erro}`
     );
+  });
 
-    return res
-      .status(500)
-      .json({
-        ok: false,
-        executado: true,
-        motivo:
-          'erro-no-processamento',
-        mensagem:
-          erro?.message ||
-          'Erro interno durante o processamento.',
-      });
-  }
+  return res
+    .status(202)
+    .json({
+      ok: true,
+      executado: true,
+      iniciado: true,
+      ignorarData,
+      status: '/status',
+      mensagem:
+        'Processamento iniciado. Consulte /status para acompanhar.',
+    });
 }
 
 app.post(
@@ -1551,15 +1555,25 @@ function iniciarServidor() {
 // ENCERRAMENTO CONTROLADO
 // ============================================================
 
-function encerrarServidor(sinal) {
+function dormirEncerramento(ms) {
+  return new Promise(resolve => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function encerrarServidor(sinal) {
   if (encerramentoIniciado) {
     return;
   }
 
   encerramentoIniciado = true;
 
+  const iniciadoEm = Date.now();
+  const limiteEm =
+    iniciadoEm + CONFIG.shutdownTimeoutMs;
+
   console.log(
-    `[Servidor] Recebido ${sinal}. Encerrando...`
+    `[Servidor] Recebido ${sinal}. Encerramento gracioso iniciado...`
   );
 
   if (tarefaCron) {
@@ -1580,41 +1594,58 @@ function encerrarServidor(sinal) {
     }
   }
 
-  if (!servidorHttp) {
-    process.exit(0);
-    return;
-  }
+  let servidorFechado = !servidorHttp;
+  let erroFechamento = null;
+  let resolverFechamento;
 
-  servidorHttp.close(erro => {
-    if (erro) {
-      console.error(
-        `[Servidor] Erro no encerramento: ` +
-        `${erro.message}`
-      );
-
-      process.exit(1);
-      return;
-    }
-
-    console.log(
-      '[Servidor] Encerrado corretamente.'
-    );
-
-    process.exit(0);
+  const fechamentoHttp = new Promise(resolve => {
+    resolverFechamento = resolve;
   });
 
-  // Fecha conexões ociosas sem interromper requisições ativas.
+  if (servidorHttp) {
+    servidorHttp.close(erro => {
+      erroFechamento = erro || null;
+      servidorFechado = !erro;
+      resolverFechamento();
+    });
 
-  if (
-    typeof servidorHttp.closeIdleConnections ===
-    'function'
-  ) {
-    servidorHttp.closeIdleConnections();
+    // Fecha somente conexões ociosas; requisições ativas podem terminar.
+    if (
+      typeof servidorHttp.closeIdleConnections ===
+      'function'
+    ) {
+      servidorHttp.closeIdleConnections();
+    }
+  } else {
+    resolverFechamento();
   }
 
-  setTimeout(() => {
+  // O cron não mantém uma conexão HTTP aberta. Por isso o encerramento
+  // aguarda explicitamente o lote em andamento, sem ultrapassar um único
+  // orçamento total de shutdown.
+  while (
+    Date.now() < limiteEm &&
+    (
+      existeExecucaoEmAndamento() ||
+      !servidorFechado
+    )
+  ) {
+    await dormirEncerramento(250);
+  }
+
+  const execucaoConcluida =
+    !existeExecucaoEmAndamento();
+
+  if (!execucaoConcluida) {
     console.error(
-      '[Servidor] Encerramento forçado após 15 segundos.'
+      `[Servidor] A execução em andamento não terminou em ` +
+      `${CONFIG.shutdownTimeoutMs} ms.`
+    );
+  }
+
+  if (!servidorFechado && servidorHttp) {
+    console.error(
+      '[Servidor] O HTTP não encerrou dentro do limite; fechando conexões restantes.'
     );
 
     if (
@@ -1624,16 +1655,44 @@ function encerrarServidor(sinal) {
       servidorHttp.closeAllConnections();
     }
 
-    process.exit(1);
-  }, 15000).unref();
+    await Promise.race([
+      fechamentoHttp,
+      dormirEncerramento(250),
+    ]);
+  }
+
+  if (erroFechamento) {
+    console.error(
+      `[Servidor] Erro no encerramento HTTP: ` +
+      `${erroFechamento.message}`
+    );
+  }
+
+  if (
+    execucaoConcluida &&
+    !erroFechamento
+  ) {
+    console.log(
+      '[Servidor] Encerrado corretamente.'
+    );
+
+    process.exit(0);
+    return;
+  }
+
+  console.error(
+    '[Servidor] Encerramento terminou de forma forçada/incompleta.'
+  );
+
+  process.exit(1);
 }
 
 process.once('SIGTERM', () => {
-  encerrarServidor('SIGTERM');
+  void encerrarServidor('SIGTERM');
 });
 
 process.once('SIGINT', () => {
-  encerrarServidor('SIGINT');
+  void encerrarServidor('SIGINT');
 });
 
 // ============================================================

@@ -48,6 +48,22 @@ test('EMAIL_MODO_TESTE rejeita false/true/texto e aceita vazio ou e-mail', () =>
 
 
 
+test('produção bloqueia EMAIL_MODO_TESTE quando o endpoint do Portal está habilitado', () => {
+  const secret = Buffer.alloc(32, 9).toString('base64');
+  const resultado = validarConfiguracao({
+    ...envBase(),
+    NODE_ENV: 'production',
+    EMAIL_MODO_TESTE: 'qa@example.test',
+    PORTAL_INTERNAL_HMAC_SECRET: secret,
+    SMTP_HOST: 'smtp.example.test',
+    SMTP_USER: 'user@example.test',
+    SMTP_PASS: 'senha-de-teste',
+  });
+
+  assert.equal(resultado.ok, false);
+  assert.match(resultado.erros.join(' '), /EMAIL_MODO_TESTE.*produção/i);
+});
+
 test('preflight rejeita placeholders, mojibake e chave administrativa fraca', () => {
   const placeholder = validarConfiguracao({
     ...envBase(),
@@ -231,6 +247,8 @@ test('links de segurança bloqueiam phishing, HTTP, path errado e ausência de f
   const origin = 'https://portal.itr.eng.br';
   assert.equal(actionUrlValida('FIRST_ACCESS', `${origin}/criar-senha.html#token=abc`, origin), true);
   assert.equal(actionUrlValida('PASSWORD_RESET', `${origin}/redefinir-senha.html#abc`, origin), true);
+  assert.equal(actionUrlValida('FIRST_ACCESS', `${origin}/redefinir-senha.html#abc`, origin), false);
+  assert.equal(actionUrlValida('PASSWORD_RESET', `${origin}/criar-senha.html#abc`, origin), false);
 
   const invalidos = [
     'http://portal.itr.eng.br/criar-senha.html#abc',

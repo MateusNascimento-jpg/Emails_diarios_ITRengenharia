@@ -27,7 +27,11 @@
 // os demais destinos de continuarem sendo processados.
 // ============================================================
 
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
+
+const {
+  normalizarTelefoneE164,
+} = require('./lib/telefone.js');
 
 const {
   montarPayloadTemplateWhatsApp,
@@ -377,78 +381,10 @@ function normalizarTelefone(
   codigoPaisPadrao =
     CONFIG.codigoPaisPadrao
 ) {
-  const original =
-    limparTexto(valor);
-
-  if (!original) {
-    return {
-      ok: false,
-      motivo: 'telefone-vazio',
-      original,
-      telefone: '',
-    };
-  }
-
-  let digitos =
-    somenteDigitos(original);
-
-  if (digitos.startsWith('00')) {
-    digitos =
-      digitos.slice(2);
-  }
-
-  if (
-    digitos.startsWith('0') &&
-    (digitos.length === 11 || digitos.length === 12)
-  ) {
-    const semZero = digitos.slice(1);
-
-    if (
-      semZero.length === 10 ||
-      semZero.length === 11
-    ) {
-      digitos = semZero;
-    }
-  }
-
-  if (
-    codigoPaisPadrao === '55' &&
-    digitos.startsWith('550') &&
-    (digitos.length === 13 || digitos.length === 14)
-  ) {
-    digitos = `55${digitos.slice(3)}`;
-  }
-
-  if (
-    codigoPaisPadrao &&
-    (
-      digitos.length === 10 ||
-      digitos.length === 11
-    )
-  ) {
-    digitos =
-      `${codigoPaisPadrao}${digitos}`;
-  }
-
-  if (
-    !/^[1-9]\d{7,14}$/.test(
-      digitos
-    )
-  ) {
-    return {
-      ok: false,
-      motivo: 'telefone-invalido',
-      original,
-      telefone: digitos,
-    };
-  }
-
-  return {
-    ok: true,
-    motivo: '',
-    original,
-    telefone: digitos,
-  };
+  return normalizarTelefoneE164(
+    valor,
+    codigoPaisPadrao
+  );
 }
 
 function normalizarListaTelefones(valor) {
@@ -1246,6 +1182,37 @@ function statusPodeSerRetentado(
   );
 }
 
+function erroMetaEhGlobal({
+  statusHttp,
+  codigoMeta,
+} = {}) {
+  const status =
+    Number(statusHttp || 0);
+
+  const codigo =
+    Number(codigoMeta || 0);
+
+  // Falhas de autenticação/conta e de definição do template afetam
+  // todas as mensagens da execução. Repeti-las para cada OS só gera
+  // carga e logs sem chance real de sucesso até intervenção.
+  if (
+    status === 401 ||
+    status === 403 ||
+    status === 404
+  ) {
+    return true;
+  }
+
+  return [
+    190,    // OAuth/token
+    132000, // quantidade de parâmetros do template
+    132001, // template/idioma inexistente ou não aprovado
+    132012, // formato dos parâmetros incompatível com o template
+    132015, // template pausado
+    132016, // template desabilitado
+  ].includes(codigo);
+}
+
 function calcularEspera(
   resposta,
   tentativa
@@ -1350,7 +1317,7 @@ async function requisitarMeta(
           'x-fb-trace-id'
         ) ||
         resposta.headers.get(
-          'x-business-use-case-usage'
+          'x-fb-request-id'
         ) ||
         '';
 
@@ -1979,6 +1946,8 @@ async function enviarWhatsAppDaOS({
   }
 
   const resultados = [];
+  const destinosInterrompidos = new Set();
+  let erroGlobalCanal = null;
 
   for (
     let indice = 0;
@@ -1987,6 +1956,20 @@ async function enviarWhatsAppDaOS({
   ) {
     const envio =
       preparado.envios[indice];
+
+    if (
+      destinosInterrompidos.has(
+        envio.indiceDestino
+      )
+    ) {
+      console.warn(
+        `[WhatsApp] Parte ${envio.indiceParte}/${envio.quantidadePartes} ` +
+        `não enviada para ${envio.telefoneMascarado}: ` +
+        `uma parte anterior deste destino falhou.`
+      );
+
+      continue;
+    }
 
     console.log(
       `[WhatsApp] Enviando mensagem ` +
@@ -2068,6 +2051,39 @@ async function enviarWhatsAppDaOS({
         tipoErro:
           respostaMeta.tipoErro || '',
       });
+
+      // Nunca envia partes posteriores para o mesmo destino depois
+      // que uma parte falhou. Evita o cliente receber "parte 2" sem
+      // ter recebido a parte 1.
+      destinosInterrompidos.add(
+        envio.indiceDestino
+      );
+
+      if (
+        erroMetaEhGlobal({
+          statusHttp:
+            respostaMeta.statusHttp,
+          codigoMeta,
+        })
+      ) {
+        erroGlobalCanal = {
+          statusHttp:
+            respostaMeta.statusHttp || 0,
+          codigoMeta,
+          subcodigoMeta,
+          mensagem:
+            respostaMeta.mensagem || '',
+        };
+
+        console.error(
+          `[WhatsApp] Canal interrompido nesta execução: ` +
+          `a falha da Meta é global ` +
+          `(HTTP ${erroGlobalCanal.statusHttp || 0}, ` +
+          `code ${codigoMeta ?? '-'}).`
+        );
+
+        break;
+      }
     } else {
       console.log(
         `[WhatsApp] Enviado com sucesso mensagem ` +
@@ -2227,6 +2243,10 @@ async function enviarWhatsAppDaOS({
         item => item.messageId
       ),
     resultados,
+    erroGlobalCanal:
+      Boolean(erroGlobalCanal),
+    detalheErroGlobal:
+      erroGlobalCanal,
   };
 
   if (houveFalha) {
@@ -2248,9 +2268,13 @@ async function enviarWhatsAppDaOS({
       parcial,
 
       motivo:
-        parcial
-          ? 'erro-meta-parcial'
-          : 'erro-meta',
+        erroGlobalCanal
+          ? 'erro-meta-global'
+          : (
+              parcial
+                ? 'erro-meta-parcial'
+                : 'erro-meta'
+            ),
 
       mensagem:
         `${destinosConcluidos.length} de ` +
