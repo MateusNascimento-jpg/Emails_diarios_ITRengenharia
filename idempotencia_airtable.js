@@ -456,6 +456,48 @@ function avaliarControle({
       controle.atualizadoEm
     );
 
+  // Uma reserva ainda válida pertence a uma execução que já está em curso.
+  // Mesmo que a fonte mude durante esse intervalo, não sobrescrevemos a
+  // reserva ativa; a atualização nova será reavaliada no próximo ciclo.
+  if (
+    controle.estado ===
+      ESTADOS.reservado &&
+    reservaAindaValida(
+      controle.atualizadoEm,
+      agora
+    )
+  ) {
+    return {
+      permitirReserva: false,
+      bloqueado: true,
+      confirmadoAnteriormente: false,
+      motivo: 'envio-ja-reservado',
+      reservaExpirada: false,
+      controle,
+    };
+  }
+
+  // Uma atualização real da fonte posterior ao último estado persistido
+  // sempre representa um novo ciclo operacional. Isso é especialmente
+  // importante no WhatsApp V3: duas atualizações diferentes podem gerar
+  // exatamente o mesmo payload (por exemplo, o mesmo order_status), logo
+  // o hash sozinho não distingue os ciclos. O timestamp da fonte distingue.
+  if (
+    fonteAtualizada &&
+    controleAtualizado &&
+    fonteAtualizada.getTime() >
+      controleAtualizado.getTime()
+  ) {
+    return {
+      permitirReserva: true,
+      bloqueado: false,
+      confirmadoAnteriormente: false,
+      motivo:
+        'fonte-atualizada-novo-ciclo',
+      controle,
+    };
+  }
+
   // Migração segura de template/layout: se a fonte de dados da OS não
   // mudou desde um envio já confirmado, uma alteração apenas no hash
   // renderizado não deve disparar o mesmo ciclo novamente.
@@ -523,20 +565,13 @@ function avaliarControle({
     controle.estado ===
     ESTADOS.reservado
   ) {
-    const ativa = reservaAindaValida(
-      controle.atualizadoEm,
-      agora
-    );
-
     return {
       permitirReserva: false,
       bloqueado: true,
       confirmadoAnteriormente: false,
-      motivo: ativa
-        ? 'envio-ja-reservado'
-        : 'reserva-expirada-resultado-incerto',
-      reservaExpirada:
-        !ativa,
+      motivo:
+        'reserva-expirada-resultado-incerto',
+      reservaExpirada: true,
       controle,
     };
   }

@@ -1,6 +1,6 @@
 {
   "name": "itr-emails-whatsapp",
-  "version": "2.3.1",
+  "version": "2.3.2",
   "private": true,
   "description": "Automação ITR de e-mail/WhatsApp, incluindo notificações transacionais de segurança do Portal.",
   "main": "server.js",
@@ -14,7 +14,7 @@
     "preview:whatsapp:json": "node previsualizar_whatsapp.js --json",
     "preview:whatsapp:tudo:json": "node previsualizar_whatsapp.js --ignorar-data --json",
     "inspecionar": "node ver_campos.js",
-    "verificar": "node --check lib/telefone.js && node --check airtable.js && node --check email_template.js && node --check enviar_email.js && node --check whatsapp_template.js && node --check enviar_whatsapp.js && node --check idempotencia_airtable.js && node --check enviar_todos.js && node --check previsualizar_whatsapp.js && node --check validar_whatsapp_local.js && node --check teste_template_whatsapp_producao.js && node --check ver_campos.js && node --check config_validation.js && node --check portal_hmac.js && node --check preflight.js && node --check server.js && node --check security_validation.js && node --check security_email_template.js && node --check security_whatsapp.js && node --check security_notifications.js",
+    "verificar": "node --check lib/telefone.js && node --check airtable.js && node --check email_template.js && node --check enviar_email.js && node --check whatsapp_template.js && node --check enviar_whatsapp.js && node --check idempotencia_airtable.js && node --check enviar_todos.js && node --check previsualizar_whatsapp.js && node --check validar_whatsapp_local.js && node --check teste_template_whatsapp_producao.js && node --check validar_prontidao_producao.js && node --check ver_campos.js && node --check config_validation.js && node --check portal_hmac.js && node --check preflight.js && node --check server.js && node --check security_validation.js && node --check security_email_template.js && node --check security_whatsapp.js && node --check security_notifications.js",
     "test": "npm run verificar && npm run test:security && npm run validar:airtable && npm run validar:whatsapp && npm run validar:idempotencia && npm run validar:v3",
     "validar:v3": "node validar_notificacoes_v3_local.js",
     "validar:whatsapp": "node validar_whatsapp_local.js",
@@ -25,7 +25,8 @@
     "test:security": "node --test tests/*.test.js",
     "preflight": "node preflight.js",
     "audit:local": "npm run verificar && npm run test:security && npm run preflight",
-    "enviar:historico": "node enviar_todos.js --ignorar-data"
+    "enviar:historico": "node enviar_todos.js --ignorar-data",
+    "validar:prontidao": "node validar_prontidao_producao.js"
   },
   "engines": {
     "node": ">=20 <23"

@@ -246,7 +246,26 @@ function validarMigracaoIdempotencia() {
   assert.equal(novaAtualizacao.permitirReserva, true);
   assert.equal(
     novaAtualizacao.motivo,
-    'conteudo-alterado'
+    'fonte-atualizada-novo-ciclo'
+  );
+
+  const mesmaMensagemNovaFonte = avaliarControle({
+    registro,
+    canal: 'email',
+    hash: hashAntigo,
+    agora: new Date('2026-09-17T10:00:00.000Z'),
+    fonteAtualizadaEm:
+      '2026-09-16T21:00:00.000Z',
+  });
+
+  assert.equal(
+    mesmaMensagemNovaFonte.permitirReserva,
+    true
+  );
+
+  assert.equal(
+    mesmaMensagemNovaFonte.motivo,
+    'fonte-atualizada-novo-ciclo'
   );
 }
 

@@ -2,9 +2,9 @@
 
 Serviço Node.js da ITR Engenharia para envio diário de atualizações por Ordem de Serviço, WhatsApp Cloud API, notificações de segurança do Portal ITR e webhook da Meta.
 
-Versão deste pacote: **2.3.1**.
+Versão deste pacote: **2.3.2**.
 
-## Estado operacional da 2.3.1
+## Estado operacional da 2.3.2
 
 - WhatsApp diário V3: `atualizacao_ordem_servico_v3`, `pt_BR`, parâmetros nomeados `order_service` e `order_status`.
 - Uma mensagem de WhatsApp por OS por telefone no V3, independentemente da quantidade de linhas da OS.
@@ -16,6 +16,10 @@ Versão deste pacote: **2.3.1**.
 - Shutdown gracioso aguarda o lote em andamento dentro de um orçamento configurável.
 - Execução direta de produção via terminal exige `--confirmar-producao`.
 - `npm run teste` executa apenas a suíte de testes; não envia mensagens.
+- Idempotência considera uma `fonteAtualizadaEm` realmente mais nova como novo ciclo mesmo quando o payload/hash do V3 é idêntico ao ciclo anterior.
+- Reserva ativa nunca é sobrescrita por uma segunda execução; atualização nova é reavaliada no ciclo seguinte.
+- `npm run validar:whatsapp:producao` consulta Meta/WABA, confirma `APPROVED`, parâmetros/header/botão e mídia pública sem enviar mensagem.
+- `npm run validar:prontidao` simula a seleção de amanhã, lê Airtable, autentica no SMTP sem envio e valida payload/idempotência de todas as OS candidatas sem escrita.
 
 ## Instalação
 
@@ -41,7 +45,7 @@ APP_TIMEZONE=America/Sao_Paulo
 
 A regra funcional continua sendo processar registros cuja `Data da Última Atualização Update` pertence ao dia anterior. `AUTOMACAO_INICIO_EM` impede envios retroativos anteriores ao marco operacional.
 
-> Observação arquitetural: a 2.3.1 mantém a semântica de "ontem" para evitar alterar silenciosamente o conjunto de clientes que receberão mensagens. Recuperação persistente de dias inteiros perdidos exige uma marca d'água armazenada fora do processo e deve ser implementada como mudança operacional própria.
+> Observação arquitetural: a 2.3.2 mantém a semântica de "ontem" para evitar alterar silenciosamente o conjunto de clientes que receberão mensagens. Recuperação persistente de dias inteiros perdidos exige uma marca d'água armazenada fora do processo e deve ser implementada como mudança operacional própria.
 
 ## WhatsApp V3
 
@@ -123,7 +127,7 @@ IDEMPOTENCIA_FALHAR_FECHADO=true
 IDEMPOTENCIA_RESERVA_TTL_MINUTOS=30
 ```
 
-Os campos de idempotência ficam na tabela `Ordem de Serviço`. Estado `incerto` permanece fail-closed de propósito para evitar duplicação quando não é possível provar se uma entrega ocorreu.
+Os campos de idempotência ficam na tabela `Ordem de Serviço`. Estado `incerto` permanece fail-closed para a mesma fonte. Se `Data da Última Atualização Update` avançar depois do estado persistido, a nova atualização é tratada como um novo ciclo mesmo que o conteúdo renderizado/hash seja igual ao anterior.
 
 ## Disparo manual
 
@@ -158,6 +162,8 @@ npm run validar:airtable        valida regras Airtable sem acessar o Airtable re
 npm run validar:whatsapp        valida WhatsApp sem chamar a Meta
 npm run validar:idempotencia    valida idempotência sem escrever no Airtable real
 npm run validar:v3              valida contratos do V3
+npm run validar:whatsapp:producao consulta Meta/WABA e valida o V3 real sem enviar
+npm run validar:prontidao       valida candidatos de amanhã + Airtable/SMTP sem enviar/escrever
 npm run enviar                  execução CLI; em produção exige --confirmar-producao
 npm run enviar:historico        execução histórica; em produção exige --confirmar-producao
 ```

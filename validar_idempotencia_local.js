@@ -505,6 +505,131 @@ async function validarBloqueioDeEnviado() {
   );
 }
 
+async function validarMesmoHashComFonteNovaPodeReservar() {
+  limpar();
+
+  const hash = hashTeste();
+
+  definirControle({
+    estado:
+      ESTADOS.enviado,
+    hash,
+    atualizadoEm:
+      '2026-09-21T11:00:00.000Z',
+  });
+
+  const resultado =
+    await reservarEnvio({
+      canal:
+        'email',
+      osId:
+        'recOSA',
+      hash,
+      agora:
+        new Date('2026-09-22T12:05:00.000Z'),
+      fonteAtualizadaEm:
+        '2026-09-22T12:00:00.000Z',
+    });
+
+  assert.equal(
+    resultado.ok,
+    true
+  );
+
+  assert.equal(
+    resultado.reservado,
+    true
+  );
+
+  assert.equal(
+    resultado.bloqueado,
+    false
+  );
+}
+
+async function validarFonteNovaDesbloqueiaIncertoAntigo() {
+  limpar();
+
+  const hash = hashTeste();
+
+  definirControle({
+    estado:
+      ESTADOS.incerto,
+    hash,
+    atualizadoEm:
+      '2026-09-21T11:00:00.000Z',
+  });
+
+  const resultado =
+    await reservarEnvio({
+      canal:
+        'email',
+      osId:
+        'recOSA',
+      hash,
+      agora:
+        new Date('2026-09-22T12:05:00.000Z'),
+      fonteAtualizadaEm:
+        '2026-09-22T12:00:00.000Z',
+    });
+
+  assert.equal(
+    resultado.ok,
+    true
+  );
+
+  assert.equal(
+    resultado.reservado,
+    true
+  );
+}
+
+async function validarReservaAtivaNaoEhSobrescritaPorFonteNova() {
+  limpar();
+
+  const hash = hashTeste();
+
+  definirControle({
+    estado:
+      ESTADOS.reservado,
+    hash:
+      criarHashDeReserva(
+        hash,
+        'execucao-em-andamento'
+      ),
+    atualizadoEm:
+      '2026-09-22T12:00:00.000Z',
+  });
+
+  const resultado =
+    await reservarEnvio({
+      canal:
+        'email',
+      osId:
+        'recOSA',
+      hash,
+      agora:
+        new Date('2026-09-22T12:10:00.000Z'),
+      fonteAtualizadaEm:
+        '2026-09-22T12:05:00.000Z',
+    });
+
+  assert.equal(
+    resultado.reservado,
+    false
+  );
+
+  assert.equal(
+    resultado.bloqueado,
+    true
+  );
+
+  assert.equal(
+    resultado.motivo,
+    'envio-ja-reservado'
+  );
+}
+
 async function validarConteudoNovoPodeReservar() {
   limpar();
 
@@ -923,6 +1048,9 @@ async function executar() {
     validarReservaNova,
     validarFinalizacaoComoEnviado,
     validarBloqueioDeEnviado,
+    validarMesmoHashComFonteNovaPodeReservar,
+    validarFonteNovaDesbloqueiaIncertoAntigo,
+    validarReservaAtivaNaoEhSobrescritaPorFonteNova,
     validarConteudoNovoPodeReservar,
     validarReservaAtivaBloqueia,
     validarReservaExpiradaViraIncerta,

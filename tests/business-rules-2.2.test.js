@@ -321,7 +321,7 @@ test('OS grande é dividida e todas as partes são preparadas para todos os tele
 
   const preparado = prepararEnvioWhatsAppDaOS({
     cliente: {
-      clienteId: 'cliente-grupo-aterpa',
+      clienteId: 'cliente-exemplo-multiplo',
       clienteNome: 'Cliente Exemplo',
       cnpj: '00000000000100',
       emailPrincipal: 'principal@cliente-exemplo.test',

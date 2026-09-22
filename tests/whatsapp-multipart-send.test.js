@@ -21,7 +21,7 @@ function executarCenario(script) {
         WHATSAPP_MODO_TESTE: 'false',
         WHATSAPP_COUNTRY_CODE: '55',
         WHATSAPP_ACCESS_TOKEN: 'token-controlado-teste',
-        WHATSAPP_PHONE_NUMBER_ID: '1314403575088695',
+        WHATSAPP_PHONE_NUMBER_ID: '2222222222222222',
         WHATSAPP_API_VERSION: 'v25.0',
         WHATSAPP_GRAPH_BASE_URL: 'https://graph.facebook.com',
         WHATSAPP_MAX_TENTATIVAS: '1',
