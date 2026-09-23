@@ -1,4 +1,4 @@
-# ITR Notificações — E-mail, WhatsApp e Segurança do Portal
+# ITR Notificações: E-mail, WhatsApp e Segurança do Portal
 
 Serviço Node.js da ITR Engenharia para envio diário de atualizações por Ordem de Serviço, WhatsApp Cloud API, notificações de segurança do Portal ITR e webhook da Meta.
 
