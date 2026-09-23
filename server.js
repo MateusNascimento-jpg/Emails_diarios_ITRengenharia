@@ -970,6 +970,18 @@ app.post(
   }
 );
 
+// Diagnóstico autenticado: não consulta clientes nem dispara mensagens.
+app.post('/internal/portal/diagnostic', portalInternalJsonParser, (req, res) => {
+  const auth = assinaturaPortalValida(req);
+  res.set('Cache-Control', 'no-store');
+  if (!auth.ok) {
+    console.warn(`[Portal Diagnóstico] Recusado: ${auth.motivo}.`);
+    return res.status(auth.status).json({ ok: false, motivo: auth.motivo });
+  }
+  console.info('[Portal Diagnóstico] Assinatura validada; nenhum e-mail enviado.');
+  return res.status(200).json({ ok: true, service: 'itr-emails-whatsapp', protocol: 1, emailSent: false });
+});
+
 // Endpoint interno usado exclusivamente pelo Portal ITR para mensagens de segurança.
 // O corpo é autenticado com HMAC, timestamp curto e nonce de uso único.
 app.post(
