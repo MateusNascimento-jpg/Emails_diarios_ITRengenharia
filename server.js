@@ -1021,6 +1021,9 @@ app.post(
   }
 );
 
+// Alertas de novos registros: rota isolada, antes do parser geral.
+require('./integridade_notifications').registrarRotas(app, express);
+
 // Parsers das demais rotas.
 //
 // Permanecem depois do webhook e do endpoint interno porque ambos dependem

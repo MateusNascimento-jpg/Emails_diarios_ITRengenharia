@@ -258,6 +258,9 @@ function validarConfiguracao(env = process.env, { estrito = true } = {}) {
     avisos.push('IDEMPOTENCIA_ATIVA=false: a proteção persistente contra reenvio está desativada.');
   }
 
+  try { require('./integridade_notifications').carregarConfig(env); }
+  catch (e) { erros.push(e.message); }
+
   return {
     ok: erros.length === 0,
     erros,
