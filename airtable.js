@@ -2440,10 +2440,12 @@ async function buscarResumoDiarioDetalhado(
   const registros =
     await buscarRegistrosDaView();
 
-  return agruparPorClienteEOSDetalhado(
-    registros,
-    opcoes
-  );
+  const resultado = agruparPorClienteEOSDetalhado(registros, opcoes);
+  if (resultado.clientes.length) {
+    const { carregarClientesAcesso, enriquecerClientes } = require('./client_directory');
+    enriquecerClientes(resultado.clientes, await carregarClientesAcesso(requisitarAirtable));
+  }
+  return resultado;
 }
 
 async function buscarResumoDiario(

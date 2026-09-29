@@ -38,11 +38,16 @@ async function processarNotificacaoSeguranca(payload) {
     );
   }
 
-  const type = String(payload?.type || '');
+  const suppliedType = String(payload?.type || '');
+  const type = suppliedType === 'ACCESS_CREDENTIALS' ? 'ACCESS_REQUEST' : suppliedType;
   if (!DEFINICOES[type]) throw erroPayload('Tipo de notificação não permitido.');
 
-  const email = emailAcessoValido(payload?.client?.email);
+  const recipients = require('./lib/portal-access').emails(type === 'ACCESS_REQUEST' ? payload?.client?.emails : payload?.client?.email);
+  const email = recipients[0];
+  const accessPassword = String(payload?.client?.accessPassword || '');
+  if (type === 'ACCESS_REQUEST' && (!accessPassword || accessPassword.length > 128 || /[\r\n]/.test(accessPassword))) throw erroPayload('Credencial de acesso inválida.');
   if (!email) throw erroPayload('E-mail de acesso inválido.');
+  if (type === 'ACCESS_REQUEST' && String(payload?.client?.cnpj || '').replace(/\D/g, '').length !== 14) throw erroPayload('CNPJ de acesso inválido.');
 
   if (!actionUrlValida(type, payload?.actionUrl, portalOrigin)) {
     throw erroPayload('Link de ação inválido.');
@@ -52,7 +57,8 @@ async function processarNotificacaoSeguranca(payload) {
     name: String(payload?.client?.name || 'Cliente').trim().slice(0, 160),
     cnpj: String(payload?.client?.cnpj || '').replace(/\D/g, '').slice(0, 14),
     email,
-    whatsapp: String(payload?.client?.whatsapp || '').trim().slice(0, 40) || null,
+    accessPassword,
+    whatsapp: String(payload?.client?.whatsapp || '').trim().slice(0, 4000) || null,
   };
 
   const conteudo = montarEmailSeguranca({
@@ -62,14 +68,16 @@ async function processarNotificacaoSeguranca(payload) {
     portalOrigin,
   });
 
-  const emailResultado = await enviar({ para: [email], ...conteudo });
-  if (!emailResultado?.ok) {
-    throw new Error('SMTP não confirmou o envio da notificação de segurança.');
+  let falhas = 0;
+  for (const recipient of recipients) {
+    try { const result = await enviar({ para: [recipient], ...conteudo }); if (!result?.ok) falhas++; }
+    catch (_) { falhas++; }
   }
+  if (falhas) throw new Error(`SMTP não confirmou ${falhas} destinatário(s). Todos foram tentados.`);
 
   let whatsapp = { ok: true, ignorado: true };
   try {
-    whatsapp = await enviarAvisoSegurancaWhatsApp({ type, client });
+    whatsapp = type === 'ACCESS_REQUEST' ? { ok: true, ignorado: true } : await enviarAvisoSegurancaWhatsApp({ type, client });
   } catch (error) {
     console.warn(`[Segurança WhatsApp] Aviso não enviado: ${error.message}`);
     whatsapp = { ok: false, ignorado: false };

@@ -3,16 +3,16 @@
 // ============================================================
 // Regra de negócio:
 // - Uma OS pode gerar um e-mail individual por destinatário válido.
-// - O primeiro e-mail válido do record da própria OS define o primeiro acesso.
+// - Os destinatários vêm do cadastro autoritativo do CNPJ.
 // - Todos os destinatários recebem o mesmo conteúdo completo da atualização.
-// - O e-mail de primeiro acesso é exibido de forma consistente para o cliente.
+// - A senha é Sigla Cliente + os seis primeiros dígitos do CNPJ.
 // ============================================================
 
 function esc(s) {
   return String(s || '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 const STATUS_EXIBICAO = {
@@ -216,77 +216,27 @@ function dataAtualizacaoDaOrdem(ordem) {
   );
 }
 
-function montarBlocoAcessoHtml({
-  usuarioLogin,
-  emailPrincipal,
-}) {
-  const portalUrl = String(
-    process.env.PORTAL_CLIENTE_URL ||
-    'https://portal.itr.eng.br/login.html'
-  ).trim();
-
-  return `
-        <div style="margin:28px 0 0;padding-top:24px;border-top:1px solid #eef0f3;">
-          <p style="margin:0 0 10px;font-size:15px;line-height:1.5;color:#0f2543;font-weight:700;">
-            Acompanhe suas amostras pelo Portal do Cliente ITR
-          </p>
-
-          <p style="margin:0 0 12px;font-size:14px;line-height:1.65;color:#374151;">
-            Acesse o portal para consultar o andamento dos ensaios e acompanhar as atualizações das suas ordens de serviço:
-          </p>
-
-          <p style="margin:0 0 18px;font-size:14px;line-height:1.6;">
-            <a href="${esc(portalUrl)}" style="color:#0f2543;font-weight:600;text-decoration:underline;">${esc(portalUrl)}</a>
-          </p>
-
-          <div style="margin:0 0 20px;padding:14px 16px;background:#f7f8fa;border:1px solid #e6e9ef;border-radius:10px;">
-            <p style="margin:0;font-size:13px;line-height:1.6;color:#374151;">
-              <strong style="color:#0f2543;">CNPJ para acesso:</strong> ${esc(formatarCnpj(usuarioLogin))}
-            </p>
-          </div>
-
-          <p style="margin:0 0 8px;font-size:14px;line-height:1.5;color:#0f2543;font-weight:700;">
-            Primeiro acesso
-          </p>
-
-          <p style="margin:0 0 14px;font-size:13px;line-height:1.65;color:#374151;">
-            Utilize seu e-mail cadastrado como senha inicial. No primeiro acesso, o Portal solicitará a criação de uma senha pessoal. Após a definição da nova senha, o e-mail não poderá mais ser utilizado como senha de acesso.
-          </p>
-
-          <div style="margin:0;padding:14px 16px;background:#f7f8fa;border:1px solid #e6e9ef;border-radius:10px;">
-            <p style="margin:0 0 4px;font-size:12px;line-height:1.5;color:#6b7280;">
-              E-mail cadastrado para primeiro acesso:
-            </p>
-            <p style="margin:0;font-size:13px;line-height:1.5;color:#111827;font-weight:700;word-break:break-word;">
-              ${esc(emailPrincipal || '-')}
-            </p>
-          </div>
-        </div>`;
+function montarBlocoAcessoHtml({ usuarioLogin, senhaAcesso }) {
+  const portalUrl = process.env.PORTAL_CLIENTE_URL || 'https://portal.itr.eng.br/login.html';
+  return `<div style="margin:28px 0 0;padding-top:24px;border-top:1px solid #eef0f3">
+    <p><strong>Acompanhe suas amostras pelo Portal do Cliente ITR</strong></p>
+    <p>Acesse o portal para consultar o andamento dos ensaios e acompanhar as atualizações das suas ordens de serviço:</p>
+    <p><a href="${esc(portalUrl)}">${esc(portalUrl)}</a></p>
+    <div style="padding:14px 16px;background:#f7f8fa;border:1px solid #e6e9ef;border-radius:10px">
+    <p><strong>CNPJ para acesso:</strong> ${esc(formatarCnpj(usuarioLogin))}</p>
+    <p><strong>Senha:</strong> ${esc(senhaAcesso)}</p></div></div>`;
 }
-
-function montarBlocoAcessoTexto({
-  usuarioLogin,
-  emailPrincipal,
-}) {
-  const portalUrl = String(
-    process.env.PORTAL_CLIENTE_URL ||
-    'https://portal.itr.eng.br/login.html'
-  ).trim();
-
-  return `\n\nAcompanhe suas amostras pelo Portal do Cliente ITR`
-    + `\n\nAcesse o portal para consultar o andamento dos ensaios e acompanhar as atualizações das suas ordens de serviço:`
-    + `\n${portalUrl}`
-    + `\n\nCNPJ para acesso: ${formatarCnpj(usuarioLogin)}`
-    + `\n\nPrimeiro acesso`
-    + `\nUtilize seu e-mail cadastrado como senha inicial. No primeiro acesso, o Portal solicitará a criação de uma senha pessoal. Após a definição da nova senha, o e-mail não poderá mais ser utilizado como senha de acesso.`
-    + `\n\nE-mail cadastrado para primeiro acesso:`
-    + `\n${emailPrincipal || '-'}`;
+function montarBlocoAcessoTexto({ usuarioLogin, senhaAcesso }) {
+  const url = process.env.PORTAL_CLIENTE_URL || 'https://portal.itr.eng.br/login.html';
+  return `\n\nAcompanhe suas amostras pelo Portal do Cliente ITR\n${url}\n\nCNPJ para acesso: ${formatarCnpj(usuarioLogin)}\nSenha: ${senhaAcesso}`;
 }
 
 function montarEmailDaOS(cliente, ordem, contexto = {}) {
   const nomeCliente = cliente?.clienteNome || 'Cliente';
   const os = ordem?.osNome || 'Ordem de Serviço';
   const usuarioLogin = cliente?.cnpj || '-';
+  const senhaAcesso = require('./lib/portal-access').senhaGerada(cliente?.siglaCliente, usuarioLogin);
+  if (!senhaAcesso) throw new Error('CNPJ/Sigla Cliente ausentes: e-mail não será enviado com credencial inválida.');
 
   const emails = obterEmailsCliente(cliente);
   const emailPrincipal = String(
@@ -326,12 +276,12 @@ function montarEmailDaOS(cliente, ordem, contexto = {}) {
 
   const blocoAcessoHtml = montarBlocoAcessoHtml({
     usuarioLogin,
-    emailPrincipal,
+    senhaAcesso,
   });
 
   const blocoAcessoTexto = montarBlocoAcessoTexto({
     usuarioLogin,
-    emailPrincipal,
+    senhaAcesso,
   });
 
   const html = `<!doctype html>

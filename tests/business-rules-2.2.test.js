@@ -155,10 +155,10 @@ test('lista legada de números não bloqueia destinatários por padrão', () => 
   );
 });
 
-test('e-mails são individualizados e todos recebem a indicação do e-mail de primeiro acesso da OS', () => {
+test('e-mails individualizados recebem a mesma senha gerada', () => {
   const cliente = {
     clienteNome: 'Empresa Exemplo',
-    cnpj: '12345678000190',
+    cnpj: '12345678000190', siglaCliente: 'EX',
     emails: [
       'principal@empresa.com.br',
       'engenharia@empresa.com.br',
@@ -222,12 +222,12 @@ test('e-mails são individualizados e todos recebem a indicação do e-mail de p
 
     assert.match(
       mensagem.texto,
-      /E-mail cadastrado para primeiro acesso:\nprincipal@empresa\.com\.br/
+      /Senha: EX123456/
     );
 
     assert.match(
       mensagem.texto,
-      /Utilize seu e-mail cadastrado como senha inicial/
+      /Senha: EX123456/
     );
 
     assert.doesNotMatch(

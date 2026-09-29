@@ -192,6 +192,12 @@ app.use((req, res, next) => {
 //
 // https://emails-diarios-itrengenharia.onrender.com/health
 
+// Contrato público mínimo para coordenar o deploy dos dois serviços.
+app.get('/release', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ version: require('./package.json').version, generatedAccess: true });
+});
+
 app.head('/health', (req, res) => {
   return res.status(200).end();
 });

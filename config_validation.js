@@ -77,6 +77,7 @@ function cronBasicoValido(valor) {
 
 function validarConfiguracao(env = process.env, { estrito = true } = {}) {
   const erros = [];
+  try { require('./lib/portal-access').campoSigla(env); } catch (error) { erros.push(error.message); }
   const avisos = [];
 
   const cronAtivo = booleano(env, 'CRON_ATIVO', true);

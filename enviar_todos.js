@@ -1383,6 +1383,12 @@ async function executarInternamente(
   );
 
   for (const cliente of clientes) {
+    if (cliente.acessoInvalido) {
+      resumo.ok = false;
+      resumo.clientesComCadastroInvalido = (resumo.clientesComCadastroInvalido || 0) + 1;
+      console.error(`[CADASTRO BLOQUEADO] ${cliente.clienteId}: ${cliente.acessoErro}. Nenhum envio ou reserva de idempotência para este cliente.`);
+      continue;
+    }
     const ordens =
       Array.isArray(
         cliente?.ordens
@@ -1804,7 +1810,7 @@ if (require.main === module) {
     })
       .then(resultado => {
         if (
-          resultado?.executado === false
+          resultado?.executado === false || resultado?.ok === false
         ) {
           process.exitCode = 2;
         }

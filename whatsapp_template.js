@@ -1249,8 +1249,9 @@ function montarVariaveisDaOS(
           '-'
         ),
 
-      senha_inicial:
-        emailAcesso,
+      senha_inicial: require('./lib/portal-access').senhaGerada(cliente?.siglaCliente, cliente?.cnpj) || '-',
+      senha: require('./lib/portal-access').senhaGerada(cliente?.siglaCliente, cliente?.cnpj) || '-',
+      senha_acesso: require('./lib/portal-access').senhaGerada(cliente?.siglaCliente, cliente?.cnpj) || '-',
 
       email_acesso:
         emailAcesso,

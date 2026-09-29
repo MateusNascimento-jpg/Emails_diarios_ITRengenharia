@@ -39,7 +39,7 @@ function clienteBase() {
   return {
     clienteId: 'cliente-v3',
     clienteNome: 'Cliente de Validação',
-    cnpj: '12345678000100',
+    cnpj: '12345678000100', siglaCliente: 'EX',
 
     // Simula um principal global antigo/incorreto para provar que
     // a OS passa a usar o primeiro e-mail do record da própria OS.
@@ -185,7 +185,7 @@ function validarEmail() {
 
     assert.match(
       mensagem.html,
-      /primeiro\.record@exemplo\.com\.br/
+      /EX123456/
     );
 
     assert.match(
@@ -276,7 +276,7 @@ validarMigracaoIdempotencia();
 console.log('VALIDAÇÃO NOTIFICAÇÕES V3: OK');
 console.log('WHATSAPP: 1 mensagem por OS por destino, 2 variáveis nomeadas');
 console.log('STATUS MISTO: Amostra recebida e Relatório Pronto');
-console.log('E-MAIL: primeiro e-mail da OS + CNPJ formatado + data real + assinatura');
+console.log('E-MAIL: destinatários da OS + CNPJ formatado + senha gerada + data real + assinatura');
 console.log('IDEMPOTÊNCIA: deploy não reenvia fonte já notificada; nova atualização continua liberada');
 console.log('CHAMADA À META: NÃO');
 console.log('CONSULTA AO AIRTABLE: NÃO');

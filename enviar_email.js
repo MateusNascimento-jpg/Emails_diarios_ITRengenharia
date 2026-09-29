@@ -159,7 +159,7 @@ async function enviar({ para, assunto, html, texto }) {
 
   const attachments = [];
   if (LOGO_EXISTE) {
-    attachments.push({ filename: 'logo.png', path: LOGO_PATH, cid: 'logoITR' });
+    attachments.push({ filename: 'logo.png', path: LOGO_PATH, cid: 'logoITR', contentDisposition: 'inline' });
   }
 
   const info = await obterTransporte().sendMail({
@@ -172,7 +172,7 @@ async function enviar({ para, assunto, html, texto }) {
   });
 
   return {
-    ok: true,
+    ok: !(Array.isArray(info.rejected) && info.rejected.length),
     id: info.messageId,
     destino: Array.isArray(destino) ? destino : [destino],
   };

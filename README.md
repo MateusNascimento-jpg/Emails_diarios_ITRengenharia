@@ -1,3 +1,7 @@
+> **Versão consolidada 2.4.1:** consulte [RELEASE_CONSOLIDADO.md](RELEASE_CONSOLIDADO.md). Esta referência substitui as instruções antigas de senha pessoal.
+
+> **Versão 2.4.0:** consulte [RELEASE_2.4.0.md](RELEASE_2.4.0.md). O acesso atual é CNPJ + senha gerada; instruções antigas de ativação/e-mail como senha não se aplicam.
+
 # ITR Notificações: E-mail, WhatsApp e Segurança do Portal
 
 Serviço Node.js da ITR Engenharia para envio diário de atualizações por Ordem de Serviço, WhatsApp Cloud API, notificações de segurança do Portal ITR e webhook da Meta.

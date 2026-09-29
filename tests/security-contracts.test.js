@@ -59,12 +59,12 @@ test('mensagem diária mantém a credencial no e-mail e o WhatsApp V3 usa OS e s
 
   assert.match(
     email,
-    /E-mail cadastrado para primeiro acesso:/
+    /Senha:/
   );
 
   assert.match(
     email,
-    /Utilize seu e-mail cadastrado como senha inicial/
+    /senhaGerada/
   );
 
   assert.match(

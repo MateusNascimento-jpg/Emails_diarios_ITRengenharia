@@ -10,6 +10,7 @@ function esc(valor) {
 }
 
 const DEFINICOES = Object.freeze({
+  ACCESS_REQUEST: { assunto: 'Dados de acesso ao Portal ITR' },
   FIRST_ACCESS: {
     assunto: 'Crie sua senha do Portal ITR',
     titulo: 'Seu primeiro acesso ao Portal ITR',
@@ -41,6 +42,7 @@ const DEFINICOES = Object.freeze({
 });
 
 function montarEmailSeguranca({ type, client, actionUrl = null, portalOrigin = 'https://portal.itr.eng.br' }) {
+  if (type === 'ACCESS_REQUEST') return require('./access_email_template').montarEmailAcesso(client, portalOrigin);
   const def = DEFINICOES[type];
   if (!def) throw new Error('Tipo de e-mail de segurança não suportado.');
   const nome = client?.name || 'Cliente';
