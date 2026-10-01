@@ -11,8 +11,10 @@ function carregarConfig(env = process.env) {
   const key = Buffer.from(secret, 'base64');
   if (key.length < 32 || key.toString('base64') !== secret) throw new Error('INTEGRIDADE_NOTIFICACOES_HMAC_SECRET exige Base64 canônico de pelo menos 32 bytes.');
   if (env.PORTAL_INTERNAL_HMAC_SECRET && key.equals(Buffer.from(env.PORTAL_INTERNAL_HMAC_SECRET, 'base64'))) throw new Error('Use segredo exclusivo para alertas de Integridade.');
-  const para = String(env.INTEGRIDADE_NOTIFICACAO_EMAIL || '').trim();
-  if (!/^[^\s@<>,;:"\\]+@[^\s@<>,;:"\\]+\.[^\s@<>,;:"\\]+$/u.test(para)) throw new Error('INTEGRIDADE_NOTIFICACAO_EMAIL exige um único endereço válido.');
+  const entradas = String(env.INTEGRIDADE_NOTIFICACAO_EMAIL || '').split(',').map(s => s.trim());
+  if (entradas.some(s => s.length > 254 || !/^[^\s@<>,;:"\\]+@[^\s@<>,;:"\\]+\.[^\s@<>,;:"\\]+$/u.test(s))) throw new Error('INTEGRIDADE_NOTIFICACAO_EMAIL exige endereços válidos separados por vírgula.');
+  const destinatarios = [...new Set(entradas.map(s => s.toLowerCase()))];
+  const para = destinatarios.join(',');
   const url = String(env.INTEGRIDADE_ADMIN_URL || '').trim();
   let parsed;
   try { parsed = new URL(url); } catch { throw new Error('INTEGRIDADE_ADMIN_URL inválida.'); }
@@ -23,7 +25,7 @@ function carregarConfig(env = process.env) {
   if (!relative.startsWith('..' + path.sep) && !path.isAbsolute(relative)) throw new Error('O diretório de recibos deve ficar fora do código da aplicação.');
   if (String(env.EMAIL_MODO_TESTE || '').trim()) throw new Error('Para ativar Integridade, EMAIL_MODO_TESTE deve estar vazio; evitar redirecionamento silencioso.');
   for (const nome of ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS']) if (!String(env[nome] || '').trim()) throw new Error(`${nome} é obrigatório para Integridade.`);
-  return { ativo: true, key, para, url: parsed.href, diretorio: path.resolve(diretorio), skew: 300 };
+  return { ativo: true, key, para, destinatarios, url: parsed.href, diretorio: path.resolve(diretorio), skew: 300 };
 }
 
 function validarEvento(body) {
@@ -122,24 +124,33 @@ function criarReceptor({ config, enviar, agora = Date.now, logger = console }) {
       if (anterior?.estado === 'sent') return reply(200, { status: 'already-sent' });
       if (anterior && !['retryable'].includes(anterior.estado)) return reply(409, { code: 'DELIVERY_UNCERTAIN' });
       ativos.add(eventId);
-      const recibo = { eventId, digest, recordType: evento.recordType, occurredAt: evento.occurredAt, estado: 'sending', atualizadoEm: new Date(agora()).toISOString() };
-      gravarAtomico(arquivo, recibo);
-      const assunto = 'ITR | Novo registro no Portal de Integridade';
-      const texto = `Um novo registro foi recebido no Portal de Integridade e Atendimento da ITR.\n\nAcesse o painel administrativo para consultar os detalhes:\n${config.url}\n\nEsta mensagem não contém dados do solicitante nem o conteúdo do registro.`;
-      const escape = s => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-      try {
-        const resultado = await enviar({ para: config.para, assunto, texto, html: `<p>Um novo registro foi recebido no Portal de Integridade e Atendimento da ITR.</p><p><a href="${escape(config.url)}">Acessar painel administrativo</a></p><p>Esta mensagem não contém dados do solicitante nem o conteúdo do registro.</p>` });
-        if (!resultado?.ok) throw Object.assign(new Error('SMTP não confirmou envio'), { code: 'NO_CONFIRMATION' });
-      } catch (e) {
-        recibo.estado = falhaAntesDaEntrega(e) ? 'retryable' : 'uncertain';
+      // A lista fica congelada por evento; mudanças no env valem para novos registros.
+      const recibo = anterior || { eventId, digest, recordType: evento.recordType, occurredAt: evento.occurredAt };
+      recibo.destinatarios ||= (config.destinatarios || config.para.split(',').map(s => s.trim())).map(para => ({ para, estado: 'retryable' }));
+      const mensagem = require('./integridade_email_template').montarEmailIntegridade(config.url);
+      for (const destino of recibo.destinatarios) {
+        if (destino.estado === 'sent') continue;
+        if (destino.estado !== 'retryable') return reply(409, { code: 'DELIVERY_UNCERTAIN' });
+        recibo.estado = 'sending';
+        destino.estado = 'sending';
+        recibo.atualizadoEm = new Date(agora()).toISOString();
         gravarAtomico(arquivo, recibo);
-        logger.warn(`[Integridade alerta] ${recibo.estado}; consulte os recibos operacionais.`);
-        return reply(recibo.estado === 'retryable' ? 503 : 409, { code: recibo.estado === 'retryable' ? 'SMTP_RETRY' : 'DELIVERY_UNCERTAIN' });
+        try {
+          const resultado = await enviar({ para: destino.para, ...mensagem });
+          if (!resultado?.ok) throw Object.assign(new Error('SMTP não confirmou envio'), { code: 'NO_CONFIRMATION' });
+        } catch (e) {
+          destino.estado = falhaAntesDaEntrega(e) ? 'retryable' : 'uncertain';
+          recibo.estado = destino.estado;
+          gravarAtomico(arquivo, recibo);
+          logger.warn(`[Integridade alerta] ${recibo.estado}; consulte os recibos operacionais.`);
+          return reply(recibo.estado === 'retryable' ? 503 : 409, { code: recibo.estado === 'retryable' ? 'SMTP_RETRY' : 'DELIVERY_UNCERTAIN' });
+        }
+        destino.estado = 'sent';
+        recibo.estado = recibo.destinatarios.every(d => d.estado === 'sent') ? 'sent' : 'retryable';
+        recibo.atualizadoEm = new Date(agora()).toISOString();
+        try { gravarAtomico(arquivo, recibo); }
+        catch { return reply(409, { code: 'DELIVERY_UNCERTAIN' }); }
       }
-      recibo.estado = 'sent';
-      recibo.atualizadoEm = new Date(agora()).toISOString();
-      try { gravarAtomico(arquivo, recibo); }
-      catch { return reply(409, { code: 'DELIVERY_UNCERTAIN' }); }
       return reply(200, { status: 'sent' });
     } catch {
       logger.error('[Integridade alerta] Falha de armazenamento; nenhum detalhe do registro foi registrado no log.');

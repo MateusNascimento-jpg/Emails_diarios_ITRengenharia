@@ -222,9 +222,9 @@ function montarBlocoAcessoHtml({ usuarioLogin, senhaAcesso }) {
     <p><strong>Acompanhe suas amostras pelo Portal do Cliente ITR</strong></p>
     <p>Acesse o portal para consultar o andamento dos ensaios e acompanhar as atualizações das suas ordens de serviço:</p>
     <p><a href="${esc(portalUrl)}">${esc(portalUrl)}</a></p>
-    <div style="padding:14px 16px;background:#f7f8fa;border:1px solid #e6e9ef;border-radius:10px">
-    <p><strong>CNPJ para acesso:</strong> ${esc(formatarCnpj(usuarioLogin))}</p>
-    <p><strong>Senha:</strong> ${esc(senhaAcesso)}</p></div></div>`;
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate"><tr><td bgcolor="#f1f3f6" style="padding:18px 20px;background:#f1f3f6;border:1px solid #dce2eb;border-radius:12px;color:#0f2543;font-size:14px;line-height:1.6">
+    <p style="margin:0 0 8px"><strong>CNPJ para acesso:</strong> ${esc(formatarCnpj(usuarioLogin))}</p>
+    <p style="margin:0"><strong>Senha:</strong> ${esc(senhaAcesso)}</p></td></tr></table></div>`;
 }
 function montarBlocoAcessoTexto({ usuarioLogin, senhaAcesso }) {
   const url = process.env.PORTAL_CLIENTE_URL || 'https://portal.itr.eng.br/login.html';

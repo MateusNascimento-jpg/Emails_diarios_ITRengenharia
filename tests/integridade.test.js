@@ -20,7 +20,7 @@ test('inativo não exige configuração nem envia', async () => {
 test('valida configuração, endereço Unicode e segredo exclusivo', t => {
  const c=config(t); const env={INTEGRIDADE_NOTIFICACOES_ATIVAS:'true',INTEGRIDADE_NOTIFICACOES_HMAC_SECRET:key.toString('base64'),INTEGRIDADE_NOTIFICACAO_EMAIL:c.para,INTEGRIDADE_ADMIN_URL:c.url,INTEGRIDADE_NOTIFICACOES_DIRETORIO:c.diretorio,SMTP_HOST:'smtp.example.com',SMTP_USER:'user',SMTP_PASS:'pass'};
  assert.equal(carregarConfig(env).para,c.para);
- for(const extra of [{EMAIL_MODO_TESTE:'teste@example.com'},{INTEGRIDADE_NOTIFICACAO_EMAIL:'a@example.com,b@example.com'},{INTEGRIDADE_ADMIN_URL:'http://example.com/admin.html'},{INTEGRIDADE_NOTIFICACOES_DIRETORIO:'.'},{PORTAL_INTERNAL_HMAC_SECRET:key.toString('base64')}]) assert.throws(()=>carregarConfig({...env,...extra}));
+ for(const extra of [{EMAIL_MODO_TESTE:'teste@example.com'},{INTEGRIDADE_NOTIFICACAO_EMAIL:'a@example.com,,b@example.com'},{INTEGRIDADE_ADMIN_URL:'http://example.com/admin.html'},{INTEGRIDADE_NOTIFICACOES_DIRETORIO:'.'},{PORTAL_INTERNAL_HMAC_SECRET:key.toString('base64')}]) assert.throws(()=>carregarConfig({...env,...extra}));
 });
 test('recibo persistente impede duplicação inclusive após reinício; corpo é genérico', async t => {
  const c=config(t); let count=0;const send=async m=>{count++;assert.equal(m.para,c.para);assert.ok(m.texto.includes(c.url));assert.ok(!m.texto.includes('protocolo'));return {ok:true};};
@@ -62,4 +62,29 @@ test('HTTP assinado, diagnóstico sem e-mail, limites e parser isolado',async t=
  response=await post('/internal/integridade/record-created',body,{'content-type':'application/json'});assert.equal(response.status,401);
  response=await post('/internal/integridade/record-created','x'.repeat(3000));assert.equal(response.status,413);
  response=await post('/outra','{"preservado":true}');assert.deepEqual(await response.json(),{preservado:true});
+});
+test('lista por vírgula valida todos, normaliza e remove duplicados', t => {
+ const c=config(t);const env={INTEGRIDADE_NOTIFICACOES_ATIVAS:'true',INTEGRIDADE_NOTIFICACOES_HMAC_SECRET:key.toString('base64'),INTEGRIDADE_NOTIFICACAO_EMAIL:' A@example.com, b@example.com,a@example.com ',INTEGRIDADE_ADMIN_URL:c.url,INTEGRIDADE_NOTIFICACOES_DIRETORIO:c.diretorio,SMTP_HOST:'smtp.example.com',SMTP_USER:'user',SMTP_PASS:'pass'};
+ assert.deepEqual(carregarConfig(env).destinatarios,['a@example.com','b@example.com']);
+ for(const valor of ['a@example.com,','a@example.com; b@example.com','a@example.com,errado','a@example.com\r\nBcc:b@example.com'])assert.throws(()=>carregarConfig({...env,INTEGRIDADE_NOTIFICACAO_EMAIL:valor}));
+});
+test('falha parcial e reinício repetem somente pendente com lista original', async t => {
+ const c={...config(t),destinatarios:['a@example.com','b@example.com']};const e=evento();const enviados=[];
+ const r=criarReceptor({config:c,logger,enviar:async m=>{enviados.push(m.para);if(m.para==='b@example.com')throw Object.assign(new Error(),{code:'ECONNREFUSED'});return {ok:true};}});
+ assert.equal((await r.processar(e)).status,503);
+ const r2=criarReceptor({config:{...c,destinatarios:['c@example.com']},logger,enviar:async m=>{enviados.push(m.para);return {ok:true};}});
+ assert.equal((await r2.processar(e)).status,200);assert.deepEqual(enviados,['a@example.com','b@example.com','b@example.com']);
+ assert.equal((await r2.processar(e)).body.status,'already-sent');
+});
+test('recibo antigo concluído não é reenviado ao adicionar destinatários',async t=>{
+ const c={...config(t),destinatarios:['a@example.com','b@example.com']};const e=evento();const digest=crypto.createHash('sha256').update(JSON.stringify([e.eventId,e.type,e.recordType,e.occurredAt])).digest('hex');
+ fs.writeFileSync(path.join(c.diretorio,e.eventId+'.json'),JSON.stringify({digest,estado:'sent'}));
+ assert.equal((await criarReceptor({config:c,logger,enviar:async()=>assert.fail('não deve enviar')}).processar(e)).body.status,'already-sent');
+});
+test('revisão manual de envio incerto preserva destinatário já enviado',async t=>{
+ const {spawnSync}=require('node:child_process');const c={...config(t),destinatarios:['a@example.com','b@example.com','c@example.com']};const e=evento();
+ await criarReceptor({config:c,logger,enviar:async m=>{if(m.para==='b@example.com')throw Object.assign(new Error(),{code:'ETIMEDOUT',command:'DATA'});return {ok:true};}}).processar(e);
+ const r=spawnSync(process.execPath,[path.join(__dirname,'../integridade_operacao.js'),'confirmar-entrega',e.eventId,'--confirmar'],{env:{...process.env,INTEGRIDADE_NOTIFICACOES_HMAC_SECRET:key.toString('base64'),INTEGRIDADE_NOTIFICACAO_EMAIL:'a@example.com,b@example.com,c@example.com',INTEGRIDADE_ADMIN_URL:c.url,INTEGRIDADE_NOTIFICACOES_DIRETORIO:c.diretorio,SMTP_HOST:'example.com',SMTP_USER:'test',SMTP_PASS:'test',EMAIL_MODO_TESTE:''},encoding:'utf8'});
+ assert.equal(r.status,0,r.stderr);const chamados=[];
+ assert.equal((await criarReceptor({config:c,logger,enviar:async m=>{chamados.push(m.para);return {ok:true};}}).processar(e)).status,200);assert.deepEqual(chamados,['c@example.com']);
 });

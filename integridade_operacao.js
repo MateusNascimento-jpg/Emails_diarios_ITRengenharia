@@ -20,7 +20,13 @@ function main(){
  if(!['sending','uncertain','retryable'].includes(item.estado))throw Error('Estado não elegível para revisão.');
  const historico=path.join(config.diretorio,'historico');fs.mkdirSync(historico,{recursive:true,mode:0o700});
  gravarAtomico(path.join(historico,`${id}.${crypto.randomUUID()}.json`),item);
- item.estado=comando==='rearmar'?'retryable':'sent';item.atualizadoEm=new Date().toISOString();item.revisaoManual=comando;
+ // Revisa apenas envios incertos; sucessos anteriores nunca são rearmados.
+ if(Array.isArray(item.destinatarios)){
+  for(const destino of item.destinatarios){
+   if(['sending','uncertain'].includes(destino.estado))destino.estado=comando==='rearmar'?'retryable':'sent';
+  }
+ }
+ item.estado=Array.isArray(item.destinatarios)?(item.destinatarios.every(d=>d.estado==='sent')?'sent':'retryable'):(comando==='rearmar'?'retryable':'sent');item.atualizadoEm=new Date().toISOString();item.revisaoManual=comando;
  gravarAtomico(arquivo,item);
  const lock=path.join(config.diretorio,id+'.lock');if(fs.existsSync(lock))fs.unlinkSync(lock);
  console.log('Recibo atualizado. Reinicie o serviço e retome o evento no Portal. Execute revisão somente com o serviço de e-mails parado.');
