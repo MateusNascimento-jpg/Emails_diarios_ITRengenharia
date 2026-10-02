@@ -326,7 +326,11 @@ function montarEmailDaOS(cliente, ordem, contexto = {}) {
 ${blocoAcessoHtml}
 
         <p style="margin:24px 0 0;font-size:14px;line-height:1.65;color:#374151;">
-          Permanecemos à disposição para qualquer esclarecimento.
+          Permanecemos à disposição para esclarecer qualquer dúvida.
+        </p>
+
+        <p style="margin:16px 0 0;font-size:14px;line-height:1.65;color:#374151;">
+          Para alterar ou remover um endereço de e-mail da lista de destinatários, entre em contato conosco.
         </p>
 
         <div style="margin-top:30px;">
@@ -359,9 +363,10 @@ ${blocoAcessoHtml}
     + linhas.map(l =>
         `- Amostra ${l.amostra || '-'} | ${l.ensaioNome || l.ensaioSigla || '-'} | ${statusExibido(l.status)}`
       ).join('\n')
-    + blocoAcessoTexto
-    + `\n\nPermanecemos à disposição para qualquer esclarecimento.`
-    + `\n\n\nAtenciosamente,\n\nEquipe ITR Engenharia`;
+    + (blocoAcessoTexto?.trim() ? `\n\n${blocoAcessoTexto.trim()}` : '')
+    + `\n\nPermanecemos à disposição para esclarecer qualquer dúvida.`
+    + `\n\nPara alterar ou remover um endereço de e-mail da lista de destinatários, entre em contato conosco.`
+    + `\n\nAtenciosamente,\nEquipe ITR Engenharia`;
 
   return {
     assunto,
