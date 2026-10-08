@@ -1,6 +1,3 @@
-> **Versão consolidada 2.4.1:** consulte [RELEASE_CONSOLIDADO.md](RELEASE_CONSOLIDADO.md). Esta referência substitui as instruções antigas de senha pessoal.
-
-> **Versão 2.4.0:** consulte [RELEASE_2.4.0.md](RELEASE_2.4.0.md). O acesso atual é CNPJ + senha gerada; instruções antigas de ativação/e-mail como senha não se aplicam.
 
 # ITR Notificações: E-mail, WhatsApp e Segurança do Portal
 
@@ -15,15 +12,6 @@ Versão deste pacote: **2.3.2**.
 - Cabeçalho IMAGE suportado por `WHATSAPP_TEMPLATE_HEADER_MEDIA_ID` ou `WHATSAPP_TEMPLATE_HEADER_MEDIA_URL`.
 - E-mail individual por destinatário, sem expor a lista de outros destinatários.
 - Destinatários de e-mail são consolidados por OS; contatos globais do cliente só entram como fallback quando a OS não possui e-mail válido.
-- Idempotência persistente no Airtable é obrigatória para o modo de produção recomendado.
-- Falhas globais de autenticação SMTP ou Meta interrompem o respectivo canal na execução corrente.
-- Shutdown gracioso aguarda o lote em andamento dentro de um orçamento configurável.
-- Execução direta de produção via terminal exige `--confirmar-producao`.
-- `npm run teste` executa apenas a suíte de testes; não envia mensagens.
-- Idempotência considera uma `fonteAtualizadaEm` realmente mais nova como novo ciclo mesmo quando o payload/hash do V3 é idêntico ao ciclo anterior.
-- Reserva ativa nunca é sobrescrita por uma segunda execução; atualização nova é reavaliada no ciclo seguinte.
-- `npm run validar:whatsapp:producao` consulta Meta/WABA, confirma `APPROVED`, parâmetros/header/botão e mídia pública sem enviar mensagem.
-- `npm run validar:prontidao` simula a seleção de amanhã, lê Airtable, autentica no SMTP sem envio e valida payload/idempotência de todas as OS candidatas sem escrita.
 
 ## Instalação
 
@@ -49,7 +37,7 @@ APP_TIMEZONE=America/Sao_Paulo
 
 A regra funcional continua sendo processar registros cuja `Data da Última Atualização Update` pertence ao dia anterior. `AUTOMACAO_INICIO_EM` impede envios retroativos anteriores ao marco operacional.
 
-> Observação arquitetural: a 2.3.2 mantém a semântica de "ontem" para evitar alterar silenciosamente o conjunto de clientes que receberão mensagens. Recuperação persistente de dias inteiros perdidos exige uma marca d'água armazenada fora do processo e deve ser implementada como mudança operacional própria.
+> Observação arquitetural: a 2.3.2 manter a semântica de "ontem" para evitar alterar silenciosamente o conjunto de clientes que receberão mensagens. Recuperação persistente de dias inteiros perdidos exige uma marca d'água armazenada fora do processo e deve ser implementada como mudança operacional própria.
 
 ## WhatsApp V3
 
@@ -130,8 +118,6 @@ IDEMPOTENCIA_ATIVA=true
 IDEMPOTENCIA_FALHAR_FECHADO=true
 IDEMPOTENCIA_RESERVA_TTL_MINUTOS=30
 ```
-
-Os campos de idempotência ficam na tabela `Ordem de Serviço`. Estado `incerto` permanece fail-closed para a mesma fonte. Se `Data da Última Atualização Update` avançar depois do estado persistido, a nova atualização é tratada como um novo ciclo mesmo que o conteúdo renderizado/hash seja igual ao anterior.
 
 ## Disparo manual
 
