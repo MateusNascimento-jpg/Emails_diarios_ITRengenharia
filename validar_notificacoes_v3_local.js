@@ -190,7 +190,7 @@ function validarEmail() {
 
     assert.match(
       mensagem.html,
-      /Permanecemos à disposição para qualquer esclarecimento\./
+      /Permanecemos à disposição para esclarecer qualquer dúvida\./
     );
 
     assert.match(
@@ -200,7 +200,7 @@ function validarEmail() {
 
     assert.match(
       mensagem.texto,
-      /Atenciosamente,\n\nEquipe ITR Engenharia/
+      /Atenciosamente,\nEquipe ITR Engenharia/
     );
   }
 }

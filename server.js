@@ -1029,6 +1029,7 @@ app.post(
 
 // Alertas de novos registros: rota isolada, antes do parser geral.
 require('./integridade_notifications').registrarRotas(app, express);
+require('./proposals/receiver').register(app, express);
 
 // Parsers das demais rotas.
 //

@@ -178,7 +178,33 @@ async function enviar({ para, assunto, html, texto }) {
   };
 }
 
+// Caminho comercial explícito: não modifica o contrato dos e-mails laboratoriais.
+async function enviarComercial({ para, assunto, html, texto, pdf, eventId }) {
+    const destinos = normalizarPara(para);
+    if (MODO_TESTE || destinos.length !== 1 || !LOGO_EXISTE || process.env.EMAIL_ATIVO !== 'true') {
+        throw Object.assign(new Error('Envio comercial indisponível.'), { code: 'EENVELOPE' });
+    }
+    const attachments = [{
+        filename: 'logo.png', content: fs.readFileSync(LOGO_PATH),
+        cid: 'logoITR', contentDisposition: 'inline'
+    }];
+    if (pdf) {
+        if (!Buffer.isBuffer(pdf.content) || pdf.content.length > 10 * 1024 * 1024) {
+            throw Object.assign(new Error('Anexo inválido.'), { code: 'EENVELOPE' });
+        }
+        attachments.push({ filename: pdf.filename, content: pdf.content, contentType: 'application/pdf', contentDisposition: 'attachment' });
+    }
+    const info = await obterTransporte().sendMail({
+        from: REMETENTE, to: destinos[0], subject: assunto, html, text: texto,
+        messageId: `<proposta-${eventId}@itr.eng.br>`, attachments,
+        disableFileAccess: true, disableUrlAccess: true
+    });
+    const accepted = Array.isArray(info.accepted) && info.accepted.some(item => String(item).toLowerCase() === destinos[0]);
+    return { ok: Boolean(accepted && !info.rejected?.length), id: info.messageId };
+}
+
 module.exports = {
+  enviarComercial,
   enviar,
   verificarConexao,
   normalizarPara,

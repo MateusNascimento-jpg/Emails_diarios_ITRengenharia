@@ -1,3 +1,7 @@
+# Atualização Propostas — 2.5.0
+
+Esta entrega acrescenta o fluxo comercial seguro. Consulte `docs/PROPOSTAS_OPERACAO.md` antes da aplicação: migração 003 no Portal, recibos persistentes em Notificações e ativação explícita são necessários. Nenhum `.env` é distribuído ou alterado. Os comandos e textos históricos abaixo são preservados como referência; para Propostas prevalece o guia novo.
+
 
 # ITR Notificações: E-mail, WhatsApp e Segurança do Portal
 
