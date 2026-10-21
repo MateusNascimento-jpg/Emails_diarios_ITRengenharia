@@ -1,3 +1,7 @@
+# Manutenção de confluência — 2.5.1
+
+Ver `docs/CONFLUENCIA_ATUAL.md`. Patch compatível sobre a release de Propostas 2.5.0, sem alterar a execução diária.
+
 # Atualização Propostas — 2.5.0
 
 Esta entrega acrescenta o fluxo comercial seguro. Consulte `docs/PROPOSTAS_OPERACAO.md` antes da aplicação: migração 003 no Portal, recibos persistentes em Notificações e ativação explícita são necessários. Nenhum `.env` é distribuído ou alterado. Os comandos e textos históricos abaixo são preservados como referência; para Propostas prevalece o guia novo.
@@ -5,11 +9,13 @@ Esta entrega acrescenta o fluxo comercial seguro. Consulte `docs/PROPOSTAS_OPERA
 
 # ITR Notificações: E-mail, WhatsApp e Segurança do Portal
 
+**Contrato atual de implantação:** `docs/CONFLUENCIA_ATUAL.md`.
+
 Serviço Node.js da ITR Engenharia para envio diário de atualizações por Ordem de Serviço, WhatsApp Cloud API, notificações de segurança do Portal ITR e webhook da Meta.
 
-Versão deste pacote: **2.3.2**.
+Versão deste pacote: **2.5.1**. A seção 2.3.2 a seguir é histórico e não substitui o contrato atual.
 
-## Estado operacional da 2.3.2
+## Histórico: estado operacional da 2.3.2
 
 - WhatsApp diário V3: `atualizacao_ordem_servico_v3`, `pt_BR`, parâmetros nomeados `order_service` e `order_status`.
 - Uma mensagem de WhatsApp por OS por telefone no V3, independentemente da quantidade de linhas da OS.
@@ -72,10 +78,10 @@ Estados da OS no V3:
 
 - Um e-mail separado por destinatário válido.
 - Assunto: `ITR Engenharia — Atualização da ordem de serviço {OS}`.
-- Exibe CNPJ formatado, Portal do Cliente e e-mail cadastrado para primeiro acesso conforme a regra atual do Portal.
-- O primeiro e-mail válido da própria OS define o e-mail de primeiro acesso.
-
-A credencial inicial baseada em e-mail é uma regra legada do Portal. A migração definitiva recomendada é primeiro acesso por token de uso único/expiração; isso é uma decisão de autenticação do Portal, não uma alteração isolada deste serviço.
+- Exibe CNPJ formatado, Portal do Cliente e **senha de acesso gerada** (sigla do cliente + seis primeiros dígitos do CNPJ).
+- Destinatários são resolvidos pela tabela Clientes, com envio individual. O login atual **não usa e-mail como senha**.
+- A credencial gerada é previsível, permanente até mudança de dados e enviada por e-mail: risco residual que exige migração coordenada para senha aleatória individual ou link temporário. Não alterar essa fórmula isoladamente.
+- O WhatsApp diário V3 usa exclusivamente OS e status e não aceita variáveis de senha.
 
 ## Segurança do Portal
 
@@ -94,10 +100,16 @@ Autenticação:
 
 Tipos aceitos:
 
+- **`ACCESS_REQUEST`**: fluxo ativo do Portal 3.4.0; reenvio por e-mail da credencial a contatos autoritativos no Airtable, sem WhatsApp.
+- `ACCESS_CREDENTIALS` é um alias de compatibilidade aceito no receptor e convertido em `ACCESS_REQUEST`; o Portal atual não o emite.
 - `FIRST_ACCESS` → somente `/criar-senha.html#...`;
 - `PASSWORD_RESET` → somente `/redefinir-senha.html#...`;
 - `PASSWORD_CREATED`;
 - `PASSWORD_CHANGED`.
+
+Os tipos `FIRST_ACCESS`, `PASSWORD_RESET`, `PASSWORD_CREATED` e `PASSWORD_CHANGED` são compatibilidade legada. Não são emitidos pelo Portal enquanto o modo `CLIENT_AUTH_MODE=generated` estiver obrigatório.
+
+O endpoint assinado `POST /internal/portal/diagnostic` não envia e-mail. Retorna impressão digital SHA-256 do contrato Airtable (base, tabela e sigla) e hora do servidor; o Portal valida esse retorno no boot e via `npm run diagnose:notifications`. O HMAC compartilhado tem nomes diferentes nos `.env`: `PORTAL_NOTIFICATIONS_HMAC_SECRET` (Portal) e `PORTAL_INTERNAL_HMAC_SECRET` (Notificações). Ambos devem conter exatamente o mesmo Base64, sem divulgá-lo em logs.
 
 Payload inválido retorna `422 payload-invalido`. Falha real de infraestrutura continua retornando 503.
 
