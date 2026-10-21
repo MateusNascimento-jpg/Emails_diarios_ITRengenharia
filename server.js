@@ -985,7 +985,17 @@ app.post('/internal/portal/diagnostic', portalInternalJsonParser, (req, res) => 
     return res.status(auth.status).json({ ok: false, motivo: auth.motivo });
   }
   console.info('[Portal Diagnóstico] Assinatura validada; nenhum e-mail enviado.');
-  return res.status(200).json({ ok: true, service: 'itr-emails-whatsapp', protocol: 1, emailSent: false });
+  try {
+    const { fingerprintAcesso, validarRegraSenha } = require('./lib/confluence-contract');
+    if (!validarRegraSenha()) throw new Error('Regra de senha de acesso fora do contrato.');
+    return res.status(200).json({
+      ok: true, service: 'itr-emails-whatsapp', protocol: 1, emailSent: false,
+      contractFingerprint: fingerprintAcesso(), serverTime: Math.floor(Date.now() / 1000),
+    });
+  } catch (error) {
+    console.error('[Portal Diagnóstico] Contrato local inválido:', error.message);
+    return res.status(503).json({ ok: false, motivo: 'contrato-invalido' });
+  }
 });
 
 // Endpoint interno usado exclusivamente pelo Portal ITR para mensagens de segurança.

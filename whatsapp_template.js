@@ -1249,10 +1249,6 @@ function montarVariaveisDaOS(
           '-'
         ),
 
-      senha_inicial: require('./lib/portal-access').senhaGerada(cliente?.siglaCliente, cliente?.cnpj) || '-',
-      senha: require('./lib/portal-access').senhaGerada(cliente?.siglaCliente, cliente?.cnpj) || '-',
-      senha_acesso: require('./lib/portal-access').senhaGerada(cliente?.siglaCliente, cliente?.cnpj) || '-',
-
       email_acesso:
         emailAcesso,
 
@@ -1612,6 +1608,11 @@ function resolverValor(
     throw new Error(
       'Foi configurado um parâmetro sem origem.'
     );
+  }
+
+  // Nunca permitir a inclusão de credenciais nos templates diários ou cabeçalhos.
+  if (/^(senha|senha_inicial|senha_acesso)$/i.test(referencia)) {
+    throw new Error('Credenciais de acesso não podem ser parâmetros do WhatsApp.');
   }
 
   if (

@@ -78,6 +78,12 @@ function cronBasicoValido(valor) {
 function validarConfiguracao(env = process.env, { estrito = true } = {}) {
   const erros = [];
   try { require('./lib/portal-access').campoSigla(env); } catch (error) { erros.push(error.message); }
+  const mapaWhatsApp = texto(env, 'WHATSAPP_TEMPLATE_BODY_PARAMETERS');
+  const headerWhatsApp = texto(env, 'WHATSAPP_TEMPLATE_HEADER_TEXT_SOURCE');
+  const nomesProibidos = /(?:^|[,=:])\s*(?:senha|senha_inicial|senha_acesso)\s*(?:,|$)/i;
+  if (nomesProibidos.test(mapaWhatsApp) || /^(senha|senha_inicial|senha_acesso)$/i.test(headerWhatsApp)) {
+    erros.push('WhatsApp não pode receber senha, senha_inicial ou senha_acesso em parâmetros de template.');
+  }
   const avisos = [];
 
   const cronAtivo = booleano(env, 'CRON_ATIVO', true);
