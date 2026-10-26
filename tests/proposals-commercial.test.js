@@ -27,6 +27,7 @@ function event(type = 'NEW') {
                 id: 'recAAAAAAAAAAAAAA',
                 numero: '001/2026',
                 nomeCliente: 'Empresa <teste>',
+                nomeContato: 'Contato <teste>',
                 cnpj: '12345678000190',
                 valor: 1234.5,
                 formaPagamento: 'Boleto',
@@ -36,9 +37,12 @@ function event(type = 'NEW') {
         ...(type === 'VERIFY'
             ? {
                   challengeId: crypto.randomUUID(),
-                  expiresAt: Date.now() + 1800000,
-                  actionUrl: 'https://portal.example.test/confirmar-proposta.html#' + 'a'.repeat(43)
+                  expiresAt: Date.now() + 2 * 60 * 60 * 1000,
+                  code: '94627135'
               }
+            : {}),
+        ...(type === 'ACCEPTED'
+            ? { documentHash: crypto.createHash('sha256').update(pdf).digest('hex') }
             : {})
     };
 }
@@ -60,7 +64,8 @@ test('anexo original real, destinatário individual, recibo sobrevive a reiníci
     const receiver = createReceiver({ config: c, send, fetcher });
     assert.equal((await receiver.process(payload)).status, 200);
     assert.equal(sent.length, 1);
-    assert.deepEqual(sent[0].pdf.content, pdf);
+    assert.equal(sent[0].pdfs.length, 1);
+    assert.deepEqual(sent[0].pdfs[0].content, pdf);
     assert.equal(sent[0].para, payload.recipient);
     const restarted = createReceiver({ config: c, send, fetcher });
     assert.equal((await restarted.process(payload)).status, 200);
@@ -104,7 +109,11 @@ test('falha SMTP anterior à entrega permite retry do mesmo evento; concorrênci
     const receiver = createReceiver({
         config: c,
         fetcher,
-        send: async () => {
+        send: async (message) => {
+            assert.equal(message.pdfs.length, 2);
+            assert.deepEqual(message.pdfs[0].content, pdf);
+            assert.deepEqual(message.pdfs[1].content, pdf);
+            assert.equal(message.pdfs[1].filename, 'Comprovante de Contrato.pdf');
             count++;
             if (count === 1) throw Object.assign(new Error('Authentication'), { code: 'EAUTH' });
             await new Promise((resolve) => setTimeout(resolve, 20));
@@ -150,7 +159,7 @@ test('HTTP comercial exige HMAC, rejeita replay persistente e não aceita URL ar
     assert.equal((await fetch(url, { method: 'POST', headers: signed, body })).status, 200);
     assert.equal((await fetch(url, { method: 'POST', headers: signed, body })).status, 401);
     const other = event('VERIFY');
-    other.actionUrl = 'https://evil.test/confirmar-proposta.html#' + 'a'.repeat(43);
+    other.actionUrl = 'https://evil.test/confirmar-proposta.html#' + 'a'.repeat(43); // Proibido no protocolo novo
     const bad = JSON.stringify(other);
     assert.equal(
         (
@@ -170,17 +179,27 @@ test('HTTP comercial exige HMAC, rejeita replay persistente e não aceita URL ar
     );
 });
 
-test('três templates comerciais preservam identidade, escapam texto e não enviam código ou senha', () => {
+test('templates comerciais preservam identidade, escapam texto e isolam código e senha', () => {
     for (const type of ['NEW', 'VERIFY', 'ACCEPTED']) {
         const payload = event(type);
         const email = render(payload, 'https://portal.example.test');
-        assert.match(email.html, /bgcolor="#000000"/);
+        assert.match(email.html, /bgcolor="#(?:000|000000)"/);
         assert.match(email.html, /cid:logoITR/);
         assert.match(email.html, /#e5e8ed/);
         assert.match(email.html, /Portal do Cliente/);
-        assert.match(email.html, /Empresa &lt;teste&gt;/);
+        // Texto dinâmico sempre escapado. A saudação usa o contato individual;
+        // o nome da empresa nunca é tratado como nome de pessoa (handoff 06).
+        assert.match(email.html, /Olá, <strong>Contato &lt;teste&gt;<\/strong>!/);
+        assert.doesNotMatch(email.html, /<teste>|Olá, <strong>Empresa/);
         assert.doesNotMatch(email.html, /<strong>Senha:/);
-        assert.equal(email.html.includes('>Confirmar aceite</a>'), type === 'VERIFY');
+        assert.doesNotMatch(email.html, />Confirmar aceite<\/a>/);
+        if (type === 'VERIFY') {
+            assert.match(email.html, /94627135/);
+            assert.match(email.texto, /2 horas/);
+            assert.doesNotMatch(email.html, /Senha:<\/strong>/);
+        } else {
+            assert.doesNotMatch(email.html, /94627135/);
+        }
     }
 });
 

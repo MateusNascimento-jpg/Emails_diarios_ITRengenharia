@@ -179,7 +179,7 @@ async function enviar({ para, assunto, html, texto }) {
 }
 
 // Caminho comercial explícito: não modifica o contrato dos e-mails laboratoriais.
-async function enviarComercial({ para, assunto, html, texto, pdf, eventId }) {
+async function enviarComercial({ para, assunto, html, texto, pdf, pdfs = [], eventId }) {
     const destinos = normalizarPara(para);
     if (MODO_TESTE || destinos.length !== 1 || !LOGO_EXISTE || process.env.EMAIL_ATIVO !== 'true') {
         throw Object.assign(new Error('Envio comercial indisponível.'), { code: 'EENVELOPE' });
@@ -188,11 +188,23 @@ async function enviarComercial({ para, assunto, html, texto, pdf, eventId }) {
         filename: 'logo.png', content: fs.readFileSync(LOGO_PATH),
         cid: 'logoITR', contentDisposition: 'inline'
     }];
-    if (pdf) {
-        if (!Buffer.isBuffer(pdf.content) || pdf.content.length > 10 * 1024 * 1024) {
+    const cloud = path.join(__dirname, 'assets', 'portal-cloud.png');
+    if (fs.existsSync(cloud)) attachments.push({
+        filename: 'portal-cloud.png', content: fs.readFileSync(cloud),
+        cid: 'portalCloud', contentDisposition: 'inline'
+    });
+    const documentos = pdf ? [pdf] : pdfs;
+    if (!Array.isArray(documentos) || documentos.length > 3 ||
+        documentos.reduce((n, p) => n + (p?.content?.length || 0), 0) > 22 * 1024 * 1024) {
+        throw Object.assign(new Error('Quantidade ou volume de anexos inválidos.'), { code: 'EENVELOPE' });
+    }
+    for (const documento of documentos) {
+        if (!documento || !Buffer.isBuffer(documento.content) ||
+            documento.content.length > 10 * 1024 * 1024 ||
+            documento.content.subarray(0,5).toString() !== '%PDF-')
             throw Object.assign(new Error('Anexo inválido.'), { code: 'EENVELOPE' });
-        }
-        attachments.push({ filename: pdf.filename, content: pdf.content, contentType: 'application/pdf', contentDisposition: 'attachment' });
+        attachments.push({ filename: documento.filename, content: documento.content,
+            contentType: 'application/pdf', contentDisposition: 'attachment' });
     }
     const info = await obterTransporte().sendMail({
         from: REMETENTE, to: destinos[0], subject: assunto, html, text: texto,

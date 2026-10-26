@@ -1,6 +1,6 @@
 {
   "name": "itr-emails-whatsapp",
-  "version": "2.5.1",
+  "version": "2.6.1",
   "private": true,
   "description": "Automação ITR de e-mail/WhatsApp, incluindo notificações transacionais de segurança do Portal.",
   "main": "server.js",
@@ -35,6 +35,6 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "node-cron": "^4.6.0",
-    "nodemailer": "10.0.10"
+    "nodemailer": "10.2.1"
   }
 }
