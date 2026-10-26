@@ -7,6 +7,13 @@ const { documento, senhaGerada, campoSigla, emails } = require('../lib/portal-ac
 const FINANCE_BASE = 'appI163NTfZrDtw22';
 const FINANCE_CLIENTS = 'tbl8Sw1hYuEvgot8O';
 
+// Falha transitória (rede, timeout, 429/5xx): o receptor adia o envio para
+// não mandar o e-mail sem a credencial. Recusa definitiva (cadastro ou
+// configuração) devolve null e a mensagem segue só com o CNPJ.
+function transient(message) {
+    return Object.assign(new Error(message), { transient: true });
+}
+
 async function list(base, table, fields, token, fetcher) {
     const records = [];
     const seen = new Set();
@@ -15,13 +22,20 @@ async function list(base, table, fields, token, fetcher) {
         const params = new URLSearchParams({ pageSize: '100' });
         for (const field of fields) params.append('fields[]', field);
         if (offset) params.set('offset', offset);
-        const response = await fetcher(`https://api.airtable.com/v0/${base}/${table}?${params}`, {
-            headers: { Authorization: `Bearer ${token}` },
-            signal: AbortSignal.timeout(12000),
-        });
-        if (!response.ok) throw new Error('ACCESS_DIRECTORY_UNAVAILABLE');
-        const payload = await response.json();
-        if (!Array.isArray(payload.records)) throw new Error('ACCESS_DIRECTORY_UNAVAILABLE');
+        let response;
+        try {
+            response = await fetcher(`https://api.airtable.com/v0/${base}/${table}?${params}`, {
+                headers: { Authorization: `Bearer ${token}` },
+                signal: AbortSignal.timeout(12000),
+            });
+        } catch (_) {
+            throw transient('ACCESS_DIRECTORY_UNAVAILABLE');
+        }
+        if (response.status === 429 || response.status >= 500) throw transient('ACCESS_DIRECTORY_UNAVAILABLE');
+        if (!response.ok) throw new Error('ACCESS_DIRECTORY_DENIED');
+        let payload;
+        try { payload = await response.json(); } catch (_) { throw transient('ACCESS_DIRECTORY_UNAVAILABLE'); }
+        if (!Array.isArray(payload?.records)) throw transient('ACCESS_DIRECTORY_UNAVAILABLE');
         records.push(...payload.records);
         offset = payload.offset || '';
         if (offset && seen.has(offset)) throw new Error('ACCESS_DIRECTORY_AMBIGUOUS');
@@ -51,14 +65,18 @@ async function accessForEmail(cnpj, email, {
         !emails(matchedFinance[0].fields?.['Email Cliente']).includes(destination)) return null;
 
     // A base Operacional é fonte canônica da sigla usada no login atual.
-    // Duplicidades ou sigla ausente bloqueiam a divulgação da senha.
+    // Mesma regra do login do Portal (airtable.js → buscarIdentidadeAcesso):
+    // todos os cadastros do CNPJ devem gerar a MESMA senha. Assim a senha do
+    // e-mail é exatamente a que o Portal aceita; sigla ausente ou siglas
+    // divergentes (login impossível no Portal) bloqueiam a divulgação.
     const operationalTable = env.AIRTABLE_CLIENTES_TABLE_ID || 'tblkQxQ6q7cBKXZ3C';
     const sigla = campoSigla(env);
     const clients = await list(env.AIRTABLE_BASE_ID, operationalTable,
         ['CNPJ', sigla], operationalToken, fetcher);
-    const matches = clients.filter((record) => documento(record.fields?.CNPJ) === doc);
-    if (matches.length !== 1) return null;
-    return senhaGerada(matches[0].fields[sigla], doc);
+    const passwords = clients.filter((record) => documento(record.fields?.CNPJ) === doc)
+        .map((record) => senhaGerada(record.fields?.[sigla] || '', doc));
+    if (!passwords.length || passwords.some((value) => !value) || new Set(passwords).size !== 1) return null;
+    return passwords[0];
 }
 
 module.exports = { list, accessForEmail };

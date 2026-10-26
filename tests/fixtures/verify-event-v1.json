@@ -1,0 +1,39 @@
+{
+  "contract": "itr-proposals-verify-v1",
+  "description": "Contrato do evento VERIFY Portal -> E-mails. Arquivo IDENTICO nos dois repositorios; alterar os dois juntos.",
+  "ttlMs": 7200000,
+  "maxAttempts": 5,
+  "codePattern": "^\\d{8}$",
+  "eventKeys": ["eventId", "type", "recipient", "snapshot", "challengeId", "expiresAt", "code"],
+  "forbiddenKeys": ["actionUrl", "documentHash", "invoice", "password", "senha"],
+  "snapshotKeys": ["version", "pdfHash", "attachmentId", "filename", "proposal"],
+  "proposalKeys": ["id", "numero", "cnpj", "clienteId", "nomeCliente", "valor", "formaPagamento", "prazoPagamentoDias", "observacoes", "descricao", "emailContato", "dataEnvio"],
+  "example": {
+    "eventId": "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0",
+    "type": "VERIFY",
+    "recipient": "compras@example.test",
+    "snapshot": {
+      "version": "1111111111111111111111111111111111111111111111111111111111111111",
+      "pdfHash": "2222222222222222222222222222222222222222222222222222222222222222",
+      "attachmentId": "attAAAAAAAAAAAAAA",
+      "filename": "Proposta.pdf",
+      "proposal": {
+        "id": "recAAAAAAAAAAAAAA",
+        "numero": "2026-077",
+        "cnpj": "12345678000190",
+        "clienteId": "recBBBBBBBBBBBBBB",
+        "nomeCliente": "Empresa Exemplo",
+        "valor": 4800,
+        "formaPagamento": "Boleto",
+        "prazoPagamentoDias": 30,
+        "observacoes": null,
+        "descricao": null,
+        "emailContato": "compras@example.test",
+        "dataEnvio": "2026-10-26"
+      }
+    },
+    "challengeId": "123e4567-e89b-42d3-a456-426614174000",
+    "expiresAt": "__NOW_PLUS_TTL__",
+    "code": "00456789"
+  }
+}

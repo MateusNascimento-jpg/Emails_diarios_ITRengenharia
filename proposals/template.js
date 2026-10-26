@@ -11,6 +11,13 @@ function dataBR(valor) {
     return partes ? `${partes[3]}/${partes[2]}/${partes[1]}` : valor;
 }
 
+// Validade exibida no fuso da ITR, independentemente do fuso do servidor.
+function validade(expiresAt) {
+    if (!Number.isFinite(expiresAt)) return null;
+    return new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit',
+        year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(expiresAt)).replace(',', ' às');
+}
+
 function escape(value) {
     return String(value ?? '').replace(/[&<>"']/g,
         (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
@@ -33,7 +40,7 @@ function render(payload, origin, { password = null } = {}) {
     const portal = origin + '/login.html';
     const copy = {
         NEW: 'Encaminhamos nossa proposta comercial para análise. Consulte as condições e registre sua decisão no Portal do Cliente.',
-        VERIFY: 'Recebemos uma solicitação para confirmar o aceite desta proposta. Informe o código abaixo na própria área de Propostas do Portal. O código é válido por 2 horas, tem uso único e não é sua senha de acesso. Se não reconhece a solicitação, ignore esta mensagem.',
+        VERIFY: 'Recebemos uma solicitação para confirmar o aceite desta proposta. Digite este código no Portal do Cliente, na área de Propostas, e confirme expressamente sua decisão. O código é válido por 2 horas (120 minutos), tem uso único e não é sua senha de acesso. Se não reconhece a solicitação, ignore esta mensagem.',
         ACCEPTED: 'O aceite da proposta foi registrado com sucesso em nosso sistema. Agradecemos a confiança na ITR Engenharia! Nossa equipe dará continuidade aos procedimentos de contratação e entrará em contato para alinhar as próximas etapas, conforme as condições previstas na proposta.',
         INVOICE: `Informamos que a nota fiscal referente ao Contrato ${escape(payload.invoice?.contractName || '')} já está disponível no Portal do Cliente. Acompanhe o prazo de vencimento indicado no documento.`,
     }[payload.type];
@@ -64,9 +71,12 @@ function render(payload, origin, { password = null } = {}) {
     // desktop usa width/height, que têm a mesma proporção do arquivo.
     const button = `<a href="${escape(portal)}" title="Acessar Portal do Cliente" target="_blank" style="display:block;width:100%;max-width:${NUVEM.largura}px;margin:0 auto;text-decoration:none"><img src="cid:portalCloud" width="${NUVEM.largura}" height="${NUVEM.altura}" alt="Acessar Portal do Cliente" style="display:block;width:100%;max-width:${NUVEM.largura}px;height:auto;margin:0 auto;border:0;outline:none;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:700;color:#1800ad" /></a>`;
     const buttonHtml = `<table role="presentation" align="center" width="100%" cellspacing="0" cellpadding="0" style="width:100%;margin:14px auto 18px"><tr><td align="center" style="padding:0;text-align:center">${button}</td></tr></table>`;
+    // Bloco de acesso: CNPJ e, quando confirmada pelas bases, a senha vigente
+    // do Portal. Sem confirmação, apenas o CNPJ (sem texto de recuperação).
     const credentialsHtml = payload.type === 'VERIFY' ? '' :
-        `<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td bgcolor="#e5e8ed" style="padding:18px 20px;background:#e5e8ed;border:1px solid #d4dae2;border-radius:8px;font-size:14px;line-height:1.7"><strong>${payload.type === 'ACCEPTED' ? 'Dados de acesso' : 'Acesso ao Portal do Cliente'}</strong><br>CNPJ: ${escape(p.cnpj)}<br>${password ? `<strong>Senha:</strong> ${escape(password)}<br>Mantenha estes dados protegidos.` : 'Para obter seus dados de acesso, utilize a recuperação de acesso do Portal.'}</td></tr></table>`;
-    const codeHtml = payload.type === 'VERIFY' ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" bgcolor="#e5e8ed" style="background:#e5e8ed;padding:20px;border:1px solid #d4dae2;border-radius:8px"><div style="font-size:12px;color:#526071;font-weight:700">CÓDIGO DE ACEITE · VÁLIDO POR 2 HORAS</div><div style="font-family:Arial,sans-serif;letter-spacing:7px;font-weight:700;font-size:32px;color:#17283a;padding-top:10px">${escape(payload.code)}</div></td></tr></table>` : '';
+        `<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td bgcolor="#e5e8ed" style="padding:18px 20px;background:#e5e8ed;border:1px solid #d4dae2;border-radius:8px;font-size:14px;line-height:1.7"><strong>${payload.type === 'ACCEPTED' ? 'Dados de acesso' : 'Acesso ao Portal do Cliente'}</strong><br>CNPJ: ${escape(p.cnpj)}${password ? `<br><strong>Senha:</strong> ${escape(password)}<br>Mantenha estes dados protegidos.` : ''}</td></tr></table>`;
+    const until = payload.type === 'VERIFY' ? validade(payload.expiresAt) : null;
+    const codeHtml = payload.type === 'VERIFY' ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" bgcolor="#e5e8ed" style="background:#e5e8ed;padding:20px;border:1px solid #d4dae2;border-radius:8px"><div style="font-size:12px;color:#526071;font-weight:700">SEU CÓDIGO DE ACEITE · VÁLIDO POR 2 HORAS</div><div style="font-family:Arial,sans-serif;letter-spacing:7px;font-weight:700;font-size:32px;color:#17283a;padding-top:10px">${escape(payload.code)}</div>${until ? `<div style="font-size:12px;color:#526071;padding-top:8px">Válido até ${escape(until)} (horário de Brasília)</div>` : ''}</td></tr></table>` : '';
     // O Gmail controla a posição dos anexos MIME. Os links autenticados
     // aparecem dentro da mensagem, e os PDFs também vão em anexo.
     const docUrl = origin + '/api/propostas/' + encodeURIComponent(p.id) + '/documento/' + encodeURIComponent(payload.snapshot.attachmentId);
@@ -87,7 +97,7 @@ function render(payload, origin, { password = null } = {}) {
         : `Mensagem automática ${payload.type === 'ACCEPTED' ? 'de confirmação do aceite da Proposta nº ' : 'referente à proposta '}${escape(number)}.`}</p></td></tr></table></td></tr></table></body></html>`;
     const acceptedText = `O aceite da Proposta nº ${number} foi registrado com sucesso em nosso sistema.\n\nAgradecemos a confiança na ITR Engenharia! Nossa equipe dará continuidade aos procedimentos de contratação e entrará em contato para alinhar as próximas etapas, conforme as condições previstas na proposta.`;
     const text = [title, '', contactName ? `Olá, ${contactName}!` : 'Olá!', '', payload.type === 'ACCEPTED' ? acceptedText : copy, '', ...displayedRows.map((r)=>`${r[0]}: ${r[1]}`), '', ...(payload.type === 'ACCEPTED' ? ['Você pode consultar a proposta aceita e acompanhar as informações da contratação pelo Portal do Cliente.', 'Acessar Portal do Cliente: '+portal] : []),
-        payload.type === 'VERIFY' ? `Código temporário: ${payload.code} (válido por 2 horas; uso único)` : `CNPJ: ${p.cnpj}\n${password ? 'Senha: '+password : 'Recupere seus dados pela página de login.'}`,
+        payload.type === 'VERIFY' ? `Seu código de aceite: ${payload.code}\nVálido por 2 horas (120 minutos)${until ? `, até ${until} (horário de Brasília)` : ''}; uso único.` : `CNPJ: ${p.cnpj}${password ? '\nSenha: '+password : ''}`,
         `Portal do Cliente: ${portal}`, '', 'Permanecemos à disposição para esclarecer dúvidas e apoiar você nas próximas etapas.', '', 'Atenciosamente,', 'Equipe ITR Engenharia', '', ...(payload.type === 'ACCEPTED' ? [`Proposta aceita: ${acceptedOriginal}`, `Comprovante de Contrato: ${acceptedProof}`] : payload.type === 'NEW' ? [`Proposta comercial: ${docUrl}`] : []), '', `Mensagem automática ${payload.type === 'ACCEPTED' ? 'de confirmação do aceite da Proposta nº ' : 'referente à proposta '}${number}.`].join('\n');
     return { assunto: `ITR Engenharia — ${title} — ${number}`, html, texto: text };
 }

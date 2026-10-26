@@ -990,6 +990,8 @@ app.post('/internal/portal/diagnostic', portalInternalJsonParser, (req, res) => 
     if (!validarRegraSenha()) throw new Error('Regra de senha de acesso fora do contrato.');
     return res.status(200).json({
       ok: true, service: 'itr-emails-whatsapp', protocol: 1, emailSent: false,
+      // Contrato do evento VERIFY aceito por proposals/receiver.js (código de 8 dígitos).
+      proposalsContract: 'verify-v1',
       contractFingerprint: fingerprintAcesso(), serverTime: Math.floor(Date.now() / 1000),
     });
   } catch (error) {
