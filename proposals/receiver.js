@@ -9,6 +9,10 @@ const { render } = require('./template');
 const { accessForEmail } = require('./access');
 
 const MAX_PDF_BYTES = 10 * 1024 * 1024;
+// O Portal emite VERIFY com expiresAt = emissão + 120 min; tolera 5 min de relógio.
+const VERIFY_MAX_TTL = 2 * 60 * 60 * 1000 + 5 * 60 * 1000;
+// Tentativas de consulta da credencial antes de enviar só com o CNPJ.
+const ACCESS_MAX_RETRIES = 5;
 
 function configuration(env = process.env) {
     const flag = env.PROPOSTAS_NOTIFICACOES_ATIVAS || 'false';
@@ -90,7 +94,9 @@ function valid(payload, origin) {
     if (payload.type === 'VERIFY') {
         if (!/^[a-f0-9-]{36}$/.test(payload.challengeId || '') ||
             !Number.isFinite(payload.expiresAt) ||
-            !/^\d{8}$/.test(payload.code || '') || payload.actionUrl) return false;
+            payload.expiresAt - Date.now() > VERIFY_MAX_TTL ||
+            typeof payload.code !== 'string' || !/^\d{8}$/.test(payload.code) ||
+            payload.actionUrl !== undefined) return false;
     } else if (payload.code || payload.actionUrl || payload.challengeId || payload.expiresAt) return false;
     if (payload.type === 'ACCEPTED' && !/^[a-f0-9]{64}$/.test(payload.documentHash || '')) return false;
     if (payload.type !== 'ACCEPTED' && payload.documentHash !== undefined) return false;
@@ -263,12 +269,23 @@ function createReceiver({ config, send, fetcher = fetch, access = accessForEmail
                 return reply(503, 'PDF_UNAVAILABLE');
             }
             // Falha fechada: nenhuma senha em e-mail de verificação.
-            // Se as bases não confirmarem o vínculo CNPJ + e-mail comercial,
-            // a mensagem segue sem senha, sem afetar o envio comercial.
+            // NEW/ACCEPTED/INVOICE: a senha só aparece quando as bases confirmam
+            // CNPJ + e-mail comercial + sigla inequívoca. Indisponibilidade
+            // transitória adia o envio (o Portal reenvia o MESMO evento); após
+            // ACCESS_MAX_RETRIES, ou em recusa definitiva, segue só com o CNPJ.
             let password = null;
             if (payload.type !== 'VERIFY') {
                 try { password = await access(payload.snapshot.proposal.cnpj, payload.recipient); }
-                catch (_) { password = null; }
+                catch (error) {
+                    if (error?.transient && (receipt.accessRetries || 0) < ACCESS_MAX_RETRIES) {
+                        receipt.accessRetries = (receipt.accessRetries || 0) + 1;
+                        gravarAtomico(file, receipt);
+                        return reply(503, 'ACCESS_RETRY');
+                    }
+                    password = null;
+                }
+                if (!password)
+                    console.warn(`[PROPOSTAS] Credencial não confirmada para o evento ${payload.eventId.slice(0, 12)}; e-mail segue com CNPJ.`);
             }
             const message = render(payload, config.origin, { password });
             receipt.state = 'sending';
@@ -319,7 +336,7 @@ function register(app, express, options = {}) {
         : null;
     app.post(
         '/internal/proposals/events',
-        express.raw({ type: 'application/json', limit: '16kb' }),
+        express.raw({ type: 'application/json', limit: '64kb' }),
         async (req, res) => {
             res.set('Cache-Control', 'no-store');
             if (!receiver) return res.status(503).json({ ok: false, code: 'DISABLED' });
@@ -350,4 +367,4 @@ function register(app, express, options = {}) {
     });
 }
 
-module.exports = { configuration, valid, attachment, acceptedAttachment, invoiceAttachments, createReceiver, register };
+module.exports = { VERIFY_MAX_TTL, ACCESS_MAX_RETRIES, configuration, valid, attachment, acceptedAttachment, invoiceAttachments, createReceiver, register };
