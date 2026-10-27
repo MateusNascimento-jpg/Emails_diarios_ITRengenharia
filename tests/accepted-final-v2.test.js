@@ -8,8 +8,8 @@ const base={snapshot:{attachmentId:'attEEEEEEEEEEEEEE',proposal:{id:'recAAAAAAAA
 test('ACCEPTED respeita conteúdo comercial aprovado e mostra ambos os documentos',()=>{
  const m=render({...base,type:'ACCEPTED'},'https://portal.example.test',{password:'DEMO2026'});
  for(const trecho of ['Olá, <strong>Mariana Costa</strong>!', 'O aceite da <strong>Proposta nº 03</strong> foi registrado com sucesso','Agradecemos a confiança na <strong>ITR Engenharia</strong>!', 'Você pode consultar a proposta aceita', 'Descrição','Serviço fictício','Entrada + parcela final','Senha:</strong> DEMO2026','Documentos Integrais','Comprovante de Contrato','Mensagem automática de confirmação do aceite da Proposta nº 03']) assert.ok(m.html.includes(trecho),trecho);
- assert.ok(m.html.indexOf('Você pode consultar')<m.html.indexOf('cid:portalCloud'));
- assert.ok(m.html.indexOf('cid:portalCloud')<m.html.indexOf('Senha:</strong>'));
+ assert.ok(m.html.indexOf('Você pode consultar')<m.html.indexOf('cid:portalCta'));
+ assert.ok(m.html.indexOf('cid:portalCta')<m.html.indexOf('Senha:</strong>'));
  assert.ok(m.html.indexOf('Atenciosamente')<m.html.indexOf('Documentos Integrais'));
 });
 test('NEW não afirma aceite e VERIFY não expõe senha permanente',()=>{
@@ -20,12 +20,12 @@ test('NEW não afirma aceite e VERIFY não expõe senha permanente',()=>{
  assert.ok(v.html.includes('VÁLIDO POR 2 HORAS'));
  assert.ok(!v.html.includes('DEMO2026'));
 });
-test('Nuvem: dimensões do <img> são exatamente um terço do PNG 3x e cabem no cartão de 640 px',()=>{
- const image=fs.readFileSync(path.join(__dirname,'../assets/portal-cloud.png'));
+test('Faixa: dimensões do <img> são exatamente um terço do PNG 3x e cabem no cartão de 640 px',()=>{
+ const image=fs.readFileSync(path.join(__dirname,'../assets/portal-cta.png'));
  assert.equal(image.subarray(1,4).toString(),'PNG');
  const width=image.readUInt32BE(16),height=image.readUInt32BE(20);
  const html=render({...base,type:'ACCEPTED'},'https://portal.example.test').html;
- const [,w,h]=html.match(/src="cid:portalCloud" width="(\d+)" height="(\d+)"/);
+ const [,w,h]=html.match(/src="cid:portalCta" width="(\d+)" height="(\d+)"/);
  assert.deepEqual([Number(w)*3,Number(h)*3],[width,height],'sem distorção no Outlook (usa width/height)');
  assert.match(html,/width="640"/);
  assert.ok(Number(w)<=580,'cabe na área útil do cartão');

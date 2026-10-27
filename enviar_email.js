@@ -188,10 +188,10 @@ async function enviarComercial({ para, assunto, html, texto, pdf, pdfs = [], eve
         filename: 'logo.png', content: fs.readFileSync(LOGO_PATH),
         cid: 'logoITR', contentDisposition: 'inline'
     }];
-    const cloud = path.join(__dirname, 'assets', 'portal-cloud.png');
-    if (fs.existsSync(cloud)) attachments.push({
-        filename: 'portal-cloud.png', content: fs.readFileSync(cloud),
-        cid: 'portalCloud', contentDisposition: 'inline'
+    const cta = path.join(__dirname, 'assets', 'portal-cta.png');
+    if (fs.existsSync(cta)) attachments.push({
+        filename: 'portal-cta.png', content: fs.readFileSync(cta),
+        cid: 'portalCta', contentDisposition: 'inline'
     });
     const documentos = pdf ? [pdf] : pdfs;
     if (!Array.isArray(documentos) || documentos.length > 3 ||

@@ -8,7 +8,7 @@
 // Para cada evento grava <tipo>.eml (MIME completo) e <tipo>.html (o mesmo
 // HTML com as imagens CID embutidas, para abrir no navegador). Com Playwright
 // disponível (opcional), também grava capturas em 640 px e 360 px e confere
-// que a nuvem aparece inteira, sem corte, dentro de um link para o Portal.
+// que a faixa aparece inteira, sem corte, dentro de um link para o Portal.
 //
 //   node scripts/previsualizar_comerciais.js <pasta-de-saida>
 
@@ -56,7 +56,7 @@ const eventos = {
         vencimento: '2026-11-20', attachments: [{ id: 'attFFFFFFFFFFFFFF', tipo: 'nfse', filename: 'NFSe_0001.pdf' }] } },
 };
 const SENHA_FICTICIA = 'DEMO000000';
-const nuvem = fs.readFileSync(path.join(__dirname, '..', 'assets', 'portal-cloud.png'));
+const faixa = fs.readFileSync(path.join(__dirname, '..', 'assets', 'portal-cta.png'));
 const logo = fs.readFileSync(path.join(__dirname, '..', 'assets', 'logo.png'));
 
 async function montar() {
@@ -69,18 +69,18 @@ async function montar() {
         await enviarComercial({ para: 'contato@example.test', assunto: corpo.assunto, html: corpo.html, texto: corpo.texto, pdfs, eventId: tipo.toLowerCase() });
         const { opcoes, bruto } = mensagens.at(-1);
         const eml = bruto.toString('utf8');
-        // O anexo inline do CID portalCloud é exatamente o PNG versionado.
-        const inline = opcoes.attachments.find(a => a.cid === 'portalCloud');
-        assert.ok(inline && inline.content.equals(nuvem), `${tipo}: CID portalCloud = assets/portal-cloud.png`);
-        assert.match(eml, /Content-ID: <portalCloud>/, `${tipo}: Content-ID no MIME`);
-        assert.match(eml, /Content-Type: image\/png; name=portal-cloud\.png/, `${tipo}: tipo PNG`);
-        assert.match(eml, /Content-Disposition: inline; filename=portal-cloud\.png/, `${tipo}: inline`);
-        assert.equal((opcoes.html.match(/cid:portalCloud/g) || []).length, 1, `${tipo}: uma nuvem`);
+        // O anexo inline do CID portalCta é exatamente o PNG versionado.
+        const inline = opcoes.attachments.find(a => a.cid === 'portalCta');
+        assert.ok(inline && inline.content.equals(faixa), `${tipo}: CID portalCta = assets/portal-cta.png`);
+        assert.match(eml, /Content-ID: <portalCta>/, `${tipo}: Content-ID no MIME`);
+        assert.match(eml, /Content-Type: image\/png; name=portal-cta\.png/, `${tipo}: tipo PNG`);
+        assert.match(eml, /Content-Disposition: inline; filename=portal-cta\.png/, `${tipo}: inline`);
+        assert.equal((opcoes.html.match(/cid:portalCta/g) || []).length, 1, `${tipo}: uma faixa`);
         assert.ok(!/<[^>]+overflow:hidden/.test(opcoes.html), `${tipo}: nenhum ancestral corta a imagem`);
         if (tipo === 'VERIFY') assert.ok(!eml.includes(SENHA_FICTICIA), 'VERIFY sem senha permanente');
         fs.writeFileSync(path.join(saida, `${tipo}.eml`), bruto);
         const html = opcoes.html
-            .replace('cid:portalCloud', 'data:image/png;base64,' + nuvem.toString('base64'))
+            .replace('cid:portalCta', 'data:image/png;base64,' + faixa.toString('base64'))
             .replace('cid:logoITR', 'data:image/png;base64,' + logo.toString('base64'));
         fs.writeFileSync(path.join(saida, `${tipo}.html`), html);
         gerados.push(tipo);
@@ -94,7 +94,7 @@ async function capturar(tipos) {
     const browser = await chromium.launch({ headless: true });
     const linhas = [];
     try {
-        for (const largura of [640, 360]) {
+        for (const largura of [640, 375]) {
             const page = await browser.newPage({ viewport: { width: largura, height: 900 }, deviceScaleFactor: 2 });
             await page.route('**/*', rota => (rota.request().url().startsWith('file:') || rota.request().url().startsWith('data:') ? rota.continue() : rota.abort()));
             for (const tipo of tipos) {
@@ -121,16 +121,16 @@ async function capturar(tipos) {
                     };
                 });
                 const proporcao = medida.largura / medida.altura;
-                assert.deepEqual(medida.natural, [672, 390], `${tipo}@${largura}: PNG 3x carregado`);
-                assert.ok(Math.abs(proporcao - 672 / 390) < 0.01, `${tipo}@${largura}: sem distorção (${proporcao.toFixed(3)})`);
+                assert.deepEqual(medida.natural, [1392, 156], `${tipo}@${largura}: PNG 3x carregado`);
+                assert.ok(Math.abs(proporcao - 1392 / 156) < 0.01, `${tipo}@${largura}: sem distorção (${proporcao.toFixed(3)})`);
                 assert.equal(medida.href, 'https://portal.itr.eng.br/login.html', `${tipo}@${largura}: link do Portal`);
                 assert.ok(medida.cobre, `${tipo}@${largura}: link cobre a imagem inteira`);
                 assert.deepEqual(medida.cortes, [], `${tipo}@${largura}: nenhum recorte`);
                 assert.ok(medida.dentroDaTela && medida.semRolagem, `${tipo}@${largura}: sem rolagem horizontal`);
                 await page.screenshot({ path: path.join(saida, `${tipo}-${largura}.png`), fullPage: true });
-                const nuvemTela = page.locator('img[alt="Acessar Portal do Cliente"]');
-                await nuvemTela.screenshot({ path: path.join(saida, `${tipo}-${largura}-nuvem.png`) });
-                linhas.push(`${tipo} @ ${largura}px: nuvem ${Math.round(medida.largura)}x${Math.round(medida.altura)} px, proporção ${proporcao.toFixed(3)}, link ok, sem corte`);
+                const faixaTela = page.locator('img[alt="Acessar Portal do Cliente"]');
+                await faixaTela.screenshot({ path: path.join(saida, `${tipo}-${largura}-faixa.png`) });
+                linhas.push(`${tipo} @ ${largura}px: faixa ${Math.round(medida.largura)}x${Math.round(medida.altura)} px, proporção ${proporcao.toFixed(3)}, link ok, sem corte`);
             }
             await page.close();
         }
@@ -143,7 +143,7 @@ async function capturar(tipos) {
 montar()
     .then(async tipos => {
         const capturas = await capturar(tipos);
-        const relatorio = `Prévia comercial: ${tipos.join(', ')} — MIME real (enviarComercial), CID portalCloud = PNG versionado.\n${capturas}\n`;
+        const relatorio = `Prévia comercial: ${tipos.join(', ')} — MIME real (enviarComercial), CID portalCta = PNG versionado.\n${capturas}\n`;
         fs.writeFileSync(path.join(saida, 'RELATORIO_PREVIA_EMAILS.txt'), relatorio);
         console.log(relatorio);
     })
