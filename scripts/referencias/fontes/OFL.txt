@@ -1,0 +1,5 @@
+OFL 1.1 — NOTA DE REPRODUÇÃO
+Este arquivo não substitui a licença da fonte.
+Open Sans Bold foi utilizada localmente na geração do PNG; a instalação disponível é distribuída sob Apache-2.0 (Debian fonts-open-sans).
+Para obter a distribuição OFL solicitada, consulte https://github.com/google/fonts/tree/main/ofl/opensans e salve OFL.txt oficial e a fonte licenciada no diretório local.
+A fonte binária não está incluída neste pacote.

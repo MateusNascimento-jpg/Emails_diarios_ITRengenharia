@@ -24,6 +24,6 @@ test('NEW e ACCEPTED: senha apenas quando autorizada; texto e HTML coerentes',()
   const revealed=render(p,'https://portal.example.test',{password:'SIG123456'});
   assert.match(revealed.html,/SIG123456/);assert.match(revealed.texto,/SIG123456/);
   if (type === 'NEW') assert.match(revealed.html,/Documentos Integrais/);
-  assert.match(revealed.html,/#1800ad/); // azul-índigo aprovado (referência 22/10)
+  assert.match(revealed.html,/#1b364f/i); // azul-índigo aprovado (referência 22/10)
  }
 });

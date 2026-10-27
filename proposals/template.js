@@ -1,10 +1,7 @@
 'use strict';
 
-// CTA "Portal do Cliente": assets/portal-cloud.png é cópia fiel da nuvem
-// aprovada (scripts/gerar_nuvem_portal.py), 672 x 390 px = 3x o tamanho
-// exibido. width/height do <img> mantêm exatamente a proporção do arquivo; a
-// nuvem fica com ~200 px de largura, letreiro ~16% maior que o texto do corpo.
-const NUVEM = Object.freeze({ largura: 224, altura: 130 });
+// CTA "Portal do Cliente": faixa azul-marinho em PNG 3x, com texto incorporado.
+const FAIXA = Object.freeze({ largura: 464, altura: 52 });
 
 function dataBR(valor) {
     const partes = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(valor || ''));
@@ -64,12 +61,8 @@ function render(payload, origin, { password = null } = {}) {
       ? `<p style="font-size:14px;line-height:1.75">O aceite da <strong>Proposta nº ${escape(number)}</strong> foi registrado com sucesso em nosso sistema.</p><p style="font-size:14px;line-height:1.75">Agradecemos a confiança na <strong>ITR Engenharia</strong>! Nossa equipe dará continuidade aos procedimentos de contratação e entrará em contato para alinhar as próximas etapas, conforme as condições previstas na proposta.</p>`
       : `<p style="font-size:14px;line-height:1.7">${copy}</p>`;
     const followUp = payload.type === 'ACCEPTED' ? `<p style="font-size:14px;line-height:1.75;margin-top:18px">Você pode consultar a proposta aceita e acompanhar as informações da contratação pelo Portal do Cliente.</p>` : '';
-    // A nuvem é a própria imagem (texto incorporado, fundo transparente) e o
-    // link cobre a imagem inteira. Sem fundo, borda ou overflow em volta: a
-    // folga transparente do PNG garante a ponta inteira. Em telas estreitas a
-    // imagem reduz proporcionalmente (width:100% + height:auto); o Outlook
-    // desktop usa width/height, que têm a mesma proporção do arquivo.
-    const button = `<a href="${escape(portal)}" title="Acessar Portal do Cliente" target="_blank" style="display:block;width:100%;max-width:${NUVEM.largura}px;margin:0 auto;text-decoration:none"><img src="cid:portalCloud" width="${NUVEM.largura}" height="${NUVEM.altura}" alt="Acessar Portal do Cliente" style="display:block;width:100%;max-width:${NUVEM.largura}px;height:auto;margin:0 auto;border:0;outline:none;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:700;color:#1800ad" /></a>`;
+    // A faixa PNG inteira é um único link; mantém proporção em telas estreitas.
+    const button = `<a href="${escape(portal)}" title="Acessar Portal do Cliente" target="_blank" style="display:block;width:100%;max-width:${FAIXA.largura}px;margin:0 auto;text-decoration:none"><img src="cid:portalCta" width="${FAIXA.largura}" height="${FAIXA.altura}" alt="Acessar Portal do Cliente" style="display:block;width:100%;max-width:${FAIXA.largura}px;height:auto;margin:0 auto;border:0;outline:none;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:700;color:#1B364F" /></a>`;
     const buttonHtml = `<table role="presentation" align="center" width="100%" cellspacing="0" cellpadding="0" style="width:100%;margin:14px auto 18px"><tr><td align="center" style="padding:0;text-align:center">${button}</td></tr></table>`;
     // Bloco de acesso: CNPJ e, quando confirmada pelas bases, a senha vigente
     // do Portal. Sem confirmação, apenas o CNPJ (sem texto de recuperação).
