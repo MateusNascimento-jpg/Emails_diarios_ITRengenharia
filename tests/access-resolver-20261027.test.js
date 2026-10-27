@@ -62,3 +62,34 @@ test('não consulta bases sem token/configuração', async () => {
     assert.equal(value, null);
     assert.equal(decision, 'AIRTABLE_CONFIG_INCOMPLETE');
 });
+
+test('token financeiro sem escopo: tenta token operacional autorizado sem divulgar dados', async () => {
+    const envFallback = { ...env, AIRTABLE_FINANCE_TOKEN: 'token-financeiro-sem-escopo', AIRTABLE_TOKEN: 'token-operacional-autorizado' };
+    const calls = [];
+    const value = await accessForEmail('12345678000199', 'a@example.test', {
+        env: envFallback,
+        fetcher: async (url, options) => {
+            const finance = new URL(url).pathname.includes('/appI163NTfZrDtw22/');
+            const authorization = options.headers.Authorization;
+            calls.push({ finance, token: authorization.split(' ')[1] });
+            if (finance && authorization === 'Bearer token-financeiro-sem-escopo') return { ok: false, status: 403 };
+            return provider()(url);
+        },
+    });
+    assert.equal(value, 'EX123456');
+    assert.deepEqual(calls, [
+        { finance: true, token: 'token-financeiro-sem-escopo' },
+        { finance: true, token: 'token-operacional-autorizado' },
+        { finance: false, token: 'token-operacional-autorizado' },
+    ]);
+});
+
+test('não faz fallback quando ambos os tokens são negados; não retorna senha', async () => {
+    const envFallback = { ...env, AIRTABLE_FINANCE_TOKEN: 'token-sem-escopo', AIRTABLE_TOKEN: 'outro-token-sem-escopo' };
+    let attempts = 0;
+    await assert.rejects(accessForEmail('12345678000199', 'a@example.test', {
+        env: envFallback,
+        fetcher: async () => { attempts++; return { ok: false, status: 403 }; },
+    }), (e) => e.status === 403 && e.message === 'ACCESS_DIRECTORY_DENIED');
+    assert.equal(attempts, 2);
+});

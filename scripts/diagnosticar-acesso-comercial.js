@@ -25,6 +25,7 @@ async function main() {
         console.log('CREDENCIAL_AUTORIZADA:', false);
         console.log('CODIGO_DO_DIAGNOSTICO:', codigo);
         console.log('CONSULTA_FALHOU:', error?.transient ? 'TEMPORARIA' : 'CADASTRO_OU_PERMISSAO');
+        if ([401, 403, 422].includes(error?.status)) console.log('AIRTABLE_HTTP:', error.status);
         process.exitCode = 1;
     }
 }

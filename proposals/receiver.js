@@ -11,7 +11,9 @@ const { accessForEmail } = require('./access');
 const MAX_PDF_BYTES = 10 * 1024 * 1024;
 // O Portal emite VERIFY com expiresAt = emissão + 120 min; tolera 5 min de relógio.
 const VERIFY_MAX_TTL = 2 * 60 * 60 * 1000 + 5 * 60 * 1000;
-// Tentativas de consulta da credencial antes de enviar só com o CNPJ.
+// Primeiras tentativas de recuperacao rapida; apos o limite, o Portal segue
+// tentando o MESMO evento com backoff ate que a credencial seja validada.
+// NUNCA enviar NEW/ACCEPTED/INVOICE apenas com CNPJ.
 const ACCESS_MAX_RETRIES = 5;
 
 function configuration(env = process.env) {
@@ -268,24 +270,32 @@ function createReceiver({ config, send, fetcher = fetch, access = accessForEmail
             } catch (_) {
                 return reply(503, 'PDF_UNAVAILABLE');
             }
-            // Falha fechada: nenhuma senha em e-mail de verificação.
-            // NEW/ACCEPTED/INVOICE: a senha só aparece quando as bases confirmam
-            // CNPJ + e-mail comercial + sigla inequívoca. Indisponibilidade
-            // transitória adia o envio (o Portal reenvia o MESMO evento); após
-            // ACCESS_MAX_RETRIES, ou em recusa definitiva, segue só com o CNPJ.
+            // VERIFY nunca contem senha permanente. Os outros tres tipos
+            // exigem senha confirmada ANTES de iniciar o SMTP. A senha nunca
+            // entra no payload HMAC, recibo persistente ou logs.
             let password = null;
             if (payload.type !== 'VERIFY') {
-                try { password = await access(payload.snapshot.proposal.cnpj, payload.recipient); }
-                catch (error) {
-                    if (error?.transient && (receipt.accessRetries || 0) < ACCESS_MAX_RETRIES) {
-                        receipt.accessRetries = (receipt.accessRetries || 0) + 1;
-                        gravarAtomico(file, receipt);
-                        return reply(503, 'ACCESS_RETRY');
-                    }
-                    password = null;
+                let reason = 'ACCESS_NOT_CONFIRMED';
+                let temporary = false;
+                try {
+                    password = await access(payload.snapshot.proposal.cnpj, payload.recipient, {
+                        onDecision: (code) => { reason = code; },
+                    });
+                } catch (error) {
+                    temporary = Boolean(error?.transient);
+                    if (reason === 'ACCESS_NOT_CONFIRMED') reason = temporary
+                        ? 'ACCESS_LOOKUP_TEMPORARY' : 'ACCESS_LOOKUP_DENIED';
                 }
-                if (!password)
-                    console.warn(`[PROPOSTAS] Credencial não confirmada para o evento ${payload.eventId.slice(0, 12)}; e-mail segue com CNPJ.`);
+                if (typeof password !== 'string' || !password.trim()) {
+                    const tries = (receipt.accessRetries || 0) + 1;
+                    receipt.accessRetries = tries;
+                    // Apenas categoria tecnica, nunca CNPJ, e-mail ou senha.
+                    receipt.accessReason = /^[A-Z_]+$/.test(reason) ? reason : 'ACCESS_NOT_CONFIRMED';
+                    gravarAtomico(file, receipt);
+                    console.warn(`[PROPOSTAS] ACCESS_NOT_CONFIRMED (${receipt.accessReason}); evento ${payload.eventId.slice(0, 12)} pendente; nenhum envio SMTP.`);
+                    return reply(503, temporary && tries <= ACCESS_MAX_RETRIES
+                        ? 'ACCESS_RETRY' : 'ACCESS_NOT_CONFIRMED');
+                }
             }
             const message = render(payload, config.origin, { password });
             receipt.state = 'sending';
