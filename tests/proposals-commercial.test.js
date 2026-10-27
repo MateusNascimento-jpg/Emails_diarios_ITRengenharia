@@ -61,13 +61,13 @@ test('anexo original real, destinatário individual, recibo sobrevive a reiníci
         sent.push(message);
         return { ok: true, id: 'smtp-id' };
     };
-    const receiver = createReceiver({ config: c, send, fetcher });
+    const receiver = createReceiver({ config: c, send, fetcher, access: async () => 'ITR123456' });
     assert.equal((await receiver.process(payload)).status, 200);
     assert.equal(sent.length, 1);
     assert.equal(sent[0].pdfs.length, 1);
     assert.deepEqual(sent[0].pdfs[0].content, pdf);
     assert.equal(sent[0].para, payload.recipient);
-    const restarted = createReceiver({ config: c, send, fetcher });
+    const restarted = createReceiver({ config: c, send, fetcher, access: async () => 'ITR123456' });
     assert.equal((await restarted.process(payload)).status, 200);
     assert.equal(sent.length, 1);
     const altered = structuredClone(payload);
@@ -92,6 +92,7 @@ test('nenhum envio sem PDF válido; resultado SMTP incerto nunca é repetido', a
     const uncertain = createReceiver({
         config: c,
         fetcher,
+        access: async () => 'ITR123456',
         send: async () => {
             sends++;
             throw Object.assign(new Error('Timeout'), { code: 'ETIMEDOUT', command: 'DATA' });
@@ -109,6 +110,7 @@ test('falha SMTP anterior à entrega permite retry do mesmo evento; concorrênci
     const receiver = createReceiver({
         config: c,
         fetcher,
+        access: async () => 'ITR123456',
         send: async (message) => {
             assert.equal(message.pdfs.length, 2);
             assert.deepEqual(message.pdfs[0].content, pdf);

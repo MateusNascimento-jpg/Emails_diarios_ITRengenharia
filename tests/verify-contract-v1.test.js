@@ -104,7 +104,7 @@ test('SMTP incerto não é repetido; falha antes da entrega permite nova tentati
     assert.equal(sent.length, 1);
 });
 
-test('NEW: credencial confirmada aparece; indisponível adia; após o limite segue só com CNPJ', async (t) => {
+test('NEW: indisponibilidade nunca envia e-mail sem senha; recupera com mesmo evento', async (t) => {
     let failures = 0;
     const r = receiver(t, { access: async () => {
         failures += 1;
@@ -124,19 +124,16 @@ test('NEW: credencial confirmada aparece; indisponível adia; após o limite seg
     for (let i = 0; i < ACCESS_MAX_RETRIES; i++)
         assert.equal((await withPdf.process(payload)).body.code, 'ACCESS_RETRY');
     assert.equal(r.sent.length, 0);
-    assert.equal((await withPdf.process(payload)).body.code, 'SENT');
-    assert.equal(r.sent.length, 1);
-    const mail = r.sent[0];
-    assert.match(mail.html, /CNPJ: 12345678000190/);
-    assert.doesNotMatch(mail.html + mail.texto, /recuperação de acesso|Recupere seus dados|Para obter seus dados/);
-    assert.doesNotMatch(mail.html, /Senha:/);
+    assert.equal((await withPdf.process(payload)).body.code, 'ACCESS_NOT_CONFIRMED');
+    assert.equal(r.sent.length, 0);
     const ok = createReceiver({
         config: { directory: r.directory, origin, secret: Buffer.alloc(32, 1).toString('base64') },
         send: async (message) => { r.sent.push(message); return { ok: true }; },
         access: async () => 'ITR123456',
         fetcher: async () => new Response(pdf, { headers: { 'content-type': 'application/pdf' } }),
     });
-    assert.equal((await ok.process({ ...payload, eventId: 'd'.repeat(64) })).body.code, 'SENT');
-    assert.match(r.sent[1].html, /CNPJ: 12345678000190<br><strong>Senha:<\/strong> ITR123456/);
-    assert.match(r.sent[1].texto, /CNPJ: 12345678000190\nSenha: ITR123456/);
+    assert.equal((await ok.process(payload)).body.code, 'SENT');
+    assert.equal(r.sent.length, 1);
+    assert.match(r.sent[0].html, /CNPJ: 12345678000190<br><strong>Senha:<\/strong> ITR123456/);
+    assert.match(r.sent[0].texto, /CNPJ: 12345678000190\nSenha: ITR123456/);
 });

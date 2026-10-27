@@ -1,6 +1,6 @@
 {
   "name": "itr-emails-whatsapp",
-  "version": "2.7.1",
+  "version": "2.7.2",
   "private": true,
   "description": "Automação ITR de e-mail/WhatsApp, incluindo notificações transacionais de segurança do Portal.",
   "main": "server.js",
@@ -26,7 +26,8 @@
     "preflight": "node preflight.js",
     "audit:local": "npm run verificar && npm run test:security && npm run preflight",
     "enviar:historico": "node enviar_todos.js --ignorar-data",
-    "validar:prontidao": "node validar_prontidao_producao.js"
+    "validar:prontidao": "node validar_prontidao_producao.js",
+    "diagnose:commercial-access": "node scripts/diagnosticar-acesso-comercial.js"
   },
   "engines": {
     "node": ">=20 <23"
