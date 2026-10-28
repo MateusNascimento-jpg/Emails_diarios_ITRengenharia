@@ -215,8 +215,41 @@ async function enviarComercial({ para, assunto, html, texto, pdf, pdfs = [], eve
     return { ok: Boolean(accepted && !info.rejected?.length), id: info.messageId };
 }
 
+// Banco de Talentos: fluxo isolado dos e-mails laboratoriais e comerciais.
+// Apenas o receptor HMAC interno chama esta função em produção.
+async function enviarTalentos({ para, assunto, html, texto, pdf, replyTo, eventId }) {
+  const destinos = normalizarPara(para);
+  if (MODO_TESTE || process.env.EMAIL_ATIVO !== 'true' ||
+      destinos.length !== 1 || destinos[0] !== 'comercial@itr.eng.br' ||
+      normalizarPara(replyTo).length !== 1 ||
+      !/^[a-f0-9]{64}$/.test(String(eventId || '')) ||
+      !pdf || !Buffer.isBuffer(pdf.content) || pdf.content.length > 5 * 1024 * 1024 ||
+      pdf.content.subarray(0, 5).toString() !== '%PDF-') {
+    throw Object.assign(new Error('Envelope de Talentos inválido.'), { code: 'EENVELOPE' });
+  }
+  const attachments = [{
+    filename: String(pdf.filename || 'curriculo.pdf').replace(/[\x00-\x1f\x7f/\\]/g, '_').slice(0, 160),
+    content: pdf.content, contentType: 'application/pdf', contentDisposition: 'attachment',
+  }];
+  if (LOGO_EXISTE) attachments.push({
+    filename: 'logo.png', content: fs.readFileSync(LOGO_PATH),
+    cid: 'logoITR', contentDisposition: 'inline',
+  });
+  const info = await obterTransporte().sendMail({
+    from: REMETENTE,
+    to: destinos[0], replyTo,
+    subject: assunto, html, text: texto,
+    messageId: `<talento-${eventId}@itr.eng.br>`, attachments,
+    disableFileAccess: true, disableUrlAccess: true,
+  });
+  const accepted = Array.isArray(info.accepted) &&
+    info.accepted.some(item => String(item).toLowerCase() === destinos[0]);
+  return { ok: Boolean(accepted && !info.rejected?.length), id: info.messageId };
+}
+
 module.exports = {
   enviarComercial,
+  enviarTalentos,
   enviar,
   verificarConexao,
   normalizarPara,
