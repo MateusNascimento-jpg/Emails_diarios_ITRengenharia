@@ -1,4 +1,8 @@
-# Manutenção de confluência — 2.5.1
+# Extensão Banco de Talentos — 2.8.0
+
+Este pacote adiciona o receptor de currículos do WordPress da ITR, **desativado por padrão**. O novo fluxo é isolado do Airtable, cron diário, WhatsApp, Portal, Propostas e Integridade. Para instalação/ativação na Hostinger, leia **`TALENTOS_INTEGRACAO_HOSTINGER.md`** antes de qualquer alteração em produção. Nenhuma variável de ambiente existente deve ser sobrescrita pelo `.env.example`.
+
+## Manutenção de confluência — histórico 2.5.1
 
 Ver `docs/CONFLUENCIA_ATUAL.md`. Patch compatível sobre a release de Propostas 2.5.0, sem alterar a execução diária.
 
