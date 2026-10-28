@@ -84,7 +84,7 @@ function build(payload) {
     `<table role="presentation" width="640" cellpadding="0" cellspacing="0" style="width:100%;max-width:640px;background:#ffffff">` +
 
     // Logotipo
-    `<tr><td style="padding:22px 28px;border-bottom:3px solid #205dc0">` +
+    `<tr><td style="padding:22px 28px;background:#123a70;border-bottom:3px solid #205dc0">` +
     `<img src="cid:logoITR" alt="ITR Engenharia" width="180" style="display:block;max-width:100%;height:auto;border:0">` +
     `</td></tr>` +
 
