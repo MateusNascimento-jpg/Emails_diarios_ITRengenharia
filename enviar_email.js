@@ -248,6 +248,9 @@ async function enviarTalentos({ para, assunto, html, texto, pdf, replyTo, eventI
 }
 
 module.exports = {
+  enviarFinanceiro: (args) => require('./billing/smtp').createSender({
+    sendMail: (message) => obterTransporte().sendMail(message),
+  })(args),
   enviarComercial,
   enviarTalentos,
   enviar,
