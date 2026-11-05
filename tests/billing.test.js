@@ -138,7 +138,7 @@ test('CNPJ adulterado, vínculo errado e campos de senha na prova são rejeitado
     }
 });
 test('schema fechado, datas, CRLF e tipos inválidos', () => {
-    for (const change of [{ type: 'BOLETO_UPDATED' }, { type: 'NEW' }, { protocol: 'v2' }, { recipient: 'a@example.test;b@example.test' }, { contractName: 'a\r\nBcc:x' }, { amountCents: -1 }, { dueDate: '2026-02-30' }, { url: 'https://evil.test' }, { document: null }]) assert.equal(valid({ ...event(), ...change }), false);
+    for (const change of [{ type: 'BOLETO_REPLACED' }, { type: 'NEW' }, { protocol: 'v2' }, { recipient: 'a@example.test;b@example.test' }, { contractName: 'a\r\nBcc:x' }, { amountCents: -1 }, { dueDate: '2026-02-30' }, { url: 'https://evil.test' }, { document: null }]) assert.equal(valid({ ...event(), ...change }), false);
     assert.equal(date('2028-02-29'), true); assert.equal(date('2026-02-29'), false);
     const p = event(); p.dueDate = null; p.eventId = eventId(p); assert.equal(valid(p), true);
     assert.doesNotMatch(render(p).html, /Vencimento|Prazo restante/);
@@ -154,7 +154,8 @@ test('HMAC inválido, expirado, replay persistido', async t => {
     assert.equal((await s.post(p, restarted, signed)).body.code, 'REPLAY');
     assert.equal((await s.post(p, restarted)).body.code, 'ALREADY_SENT');
     assert.equal(s.messages.length, 1);
-    assert.equal((await s.post({ ...p, amountCents: 1 })).body.code, 'EVENT_CONFLICT');
+    assert.equal((await s.post({ ...p, amountCents: 1 })).body.code, 'INVALID_EVENT');
+    assert.equal((await s.post({ ...p, stateVersion: 'd'.repeat(64) })).body.code, 'EVENT_CONFLICT');
 });
 for (const proof of [{ authorized: false }, { chainVerified: false }, { baselineVerified: false }, { eligible: false }, { contractStatus: 'Cancelado' }, { proposalStatus: 'Enviada' }, { paymentStatus: 'Pago' }, { paymentStatus: 'Cancelado' }, { paymentStatus: 'desconhecido' }, { eventDigest: 'a'.repeat(64) }, { requestNonce: 'fake' }, { expiresAt: now }, { checkedAt: now - 6000 }, { documentPayable: false }, { leaseId: null }]) test('evidência bloqueada: ' + JSON.stringify(proof), async t => {
     const s = setup(t, { proof }); assert.equal((await s.post(event())).body.code, 'PORTAL_VALIDATION_FAILED'); assert.equal(s.messages.length, 0);
@@ -249,4 +250,61 @@ test('lembrete vencido informa os acréscimos sem percentual e sem afirmar valid
     assert.match(texto, /Valor da parcela: R\$/);
     for (const type of ['BOLETO_AVAILABLE', 'BOLETO_D_MINUS_1', 'BOLETO_DUE_TODAY', 'BOLETO_PAYMENT_RECORDED', 'NFSE_AVAILABLE'])
         assert.doesNotMatch(render(event(type)).texto, /acréscimos/, type);
+});
+test('BOLETO_UPDATED exige documento de boleto, vencimento e valor', () => {
+    const p = event('BOLETO_UPDATED'); assert.equal(valid(p), true);
+    const same = { sha256: p.document.sha256, dueDate: p.dueDate, amountCents: p.amountCents };
+    for (const change of [{ dueDate: null }, { amountCents: null }, { amountCents: 0 }, { document: null }, { document: { ...p.document, kind: 'nfse' } }, { transitionId: 'b'.repeat(64) },
+        { previous: same }, { previous: { ...same, dueDate: null } }, { previous: { ...same, amountCents: null } }, { previous: null }, { previous: { ...same, sha256: 'x' } }, { previous: { ...same, dueDate: 'ontem', amountCents: 1 } }, { previous: { ...same, amountCents: -1 } }, { previous: { ...same, extra: 1, amountCents: 1 } }]) {
+        const q = { ...p, ...change }; q.eventId = eventId(q); assert.equal(valid(q), false, JSON.stringify(change));
+    }
+});
+test('a identidade do evento acompanha conteúdo, vencimento e valor, não o anexo', () => {
+    const p = event();
+    assert.notEqual(eventId({ ...p, amountCents: 1 }), p.eventId); assert.notEqual(eventId({ ...p, dueDate: '2026-12-01' }), p.eventId);
+    assert.notEqual(eventId({ ...p, document: { ...p.document, sha256: 'f'.repeat(64) } }), p.eventId);
+    assert.equal(eventId({ ...p, document: { ...p.document, id: 'attGGGGGGGGGGGGGG' } }), p.eventId);
+});
+test('boleto atualizado orienta a usar somente a versão anexa, sem percentual', () => {
+    const p = event('BOLETO_UPDATED'), { assunto, html, texto } = render(p, Date.parse('2026-11-04T12:00:00Z'));
+    assert.match(assunto, /Boleto atualizado/);
+    const paragraphs = ['Informamos que o boleto referente à sua parcela foi atualizado.',
+        'A versão vigente segue anexa em PDF e substitui o documento anteriormente encaminhado. Utilize exclusivamente o documento atualizado para pagamento.',
+        'Caso o vencimento já tenha ocorrido, aplicam-se os acréscimos previstos em contrato.',
+        'Se o pagamento já foi realizado, desconsidere esta comunicação. Em caso de dúvidas, entre em contato com nossa equipe financeira.'];
+    for (const text of paragraphs) { assert.ok(texto.includes(`\n\n${text}\n\n`), text); assert.ok(html.includes(`<p style="font-size:15px;line-height:1.7">${text}</p>`), text); }
+    assert.doesNotMatch(texto, /%|juros de|multa de/i);
+});
+test('o campo previous só existe em BOLETO_UPDATED e integra a identidade', () => {
+    const a = event(); a.previous = { sha256: 'd'.repeat(64), dueDate: null, amountCents: null }; assert.equal(valid(a), false);
+    const p = event('BOLETO_UPDATED'), q = { ...p, previous: { ...p.previous, sha256: 'e'.repeat(64) } };
+    assert.notEqual(eventId(q), p.eventId); assert.equal(valid(q), false, 'previous alterado invalida o eventId assinado');
+});
+test('dados alterados com o mesmo PDF: descreve só o que mudou e não anuncia documento novo', () => {
+    const base = event('BOLETO_UPDATED'), at = Date.parse('2026-11-04T12:00:00Z');
+    const build = previous => { const p = { ...base, previous: { sha256: base.document.sha256, dueDate: base.dueDate, amountCents: base.amountCents, ...previous } }; p.eventId = eventId(p); assert.equal(valid(p), true); return render(p, at); };
+    const due = build({ dueDate: '2026-10-30' }), amount = build({ amountCents: 140000 }), both = build({ dueDate: '2026-10-30', amountCents: 140000 });
+    for (const { assunto, html, texto } of [due, amount, both]) {
+        assert.match(assunto, /Dados do boleto atualizados/);
+        for (const part of [html, texto]) { assert.match(part, /sem alteração do arquivo/); assert.doesNotMatch(part, /substitui|documento atualizado|versão vigente|Boleto atualizado/); }
+        assert.doesNotMatch(texto, /%|juros de|multa de/i);
+    }
+    assert.match(due.texto, /Vencimento: de 30\/10\/2026 para 05\/11\/2026\./); assert.doesNotMatch(due.texto, /Valor da parcela: de/);
+    assert.match(amount.texto, /Valor da parcela: de R\$\s1\.400,00 para R\$\s1\.500,50\./); assert.doesNotMatch(amount.texto, /Vencimento: de/);
+    assert.match(both.texto, /Vencimento: de/); assert.match(both.texto, /Valor da parcela: de/);
+});
+test('PDF alterado usa o texto de substituição, mesmo que os dados também mudem', () => {
+    const base = event('BOLETO_UPDATED'), p = { ...base, previous: { sha256: 'd'.repeat(64), dueDate: '2026-10-30', amountCents: 140000 } }; p.eventId = eventId(p);
+    const { assunto, texto } = render(p, Date.parse('2026-11-04T12:00:00Z'));
+    assert.match(assunto, /\| Boleto atualizado \|/); assert.match(texto, /substitui o documento anteriormente encaminhado/); assert.doesNotMatch(texto, /sem alteração do arquivo|: de /);
+});
+test('as duas variantes têm o mesmo layout: só muda o texto', () => {
+    const base = event('BOLETO_UPDATED'), same = { ...base, previous: { sha256: base.document.sha256, dueDate: '2026-10-30', amountCents: base.amountCents } }; same.eventId = eventId(same);
+    const shell = html => html.replace(/<h1[^>]*>.*?<\/h1>/, '').replace(/<p style="font-size:15px;line-height:1\.7">.*?<\/p>/g, '').replace(/<div style="display:none[^>]*>.*?<\/div>/, '');
+    assert.equal(shell(render(same, now).html), shell(render(base, now).html));
+});
+test('boleto atualizado passa pelo receptor e anexa o PDF', async t => {
+    const s = setup(t), p = event('BOLETO_UPDATED');
+    const r = await s.post(p); assert.equal(r.status, 200); assert.equal(s.messages.length, 1);
+    assert.equal((await s.post(p)).body.code, 'ALREADY_SENT'); assert.equal(s.messages.length, 1);
 });
