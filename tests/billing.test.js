@@ -239,3 +239,14 @@ test('SMTP financeiro desativado e pagamento sem boleto', async () => {
     await send({ event: p, pdfs: [], now }); assert.equal(mail.attachments.length, 2);
     await assert.rejects(send({ event: p, pdfs: [{ content: pdf }], now }));
 });
+test('lembrete vencido informa os acréscimos sem percentual e sem afirmar validação financeira', () => {
+    const p = event('BOLETO_OVERDUE_REMINDER'), { html, texto } = render(p, Date.parse(p.scheduledFor + 'T12:00:00Z'));
+    for (const part of [html, texto]) {
+        assert.match(part, /pagamento após o vencimento está sujeito aos acréscimos previstos em contrato/);
+        assert.doesNotMatch(part, /elegibilidade|revalidad|ao dia|juros de|multa de/i);
+    }
+    assert.doesNotMatch(texto, /%/); // O HTML tem larguras em %.
+    assert.match(texto, /Valor da parcela: R\$/);
+    for (const type of ['BOLETO_AVAILABLE', 'BOLETO_D_MINUS_1', 'BOLETO_DUE_TODAY', 'BOLETO_PAYMENT_RECORDED', 'NFSE_AVAILABLE'])
+        assert.doesNotMatch(render(event(type)).texto, /acréscimos/, type);
+});
