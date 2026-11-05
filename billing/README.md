@@ -49,6 +49,10 @@ Valor e vencimento integram o eventId: alterá-los sem recalcular a chave invali
 
 O envio ocorre das 08:00 às 18:00 em America/Sao_Paulo, todos os dias, com `withinWindow()` de `contract.js`. Fora dela, o receptor responde 503 `OUTSIDE_SEND_WINDOW` antes de consultar o Portal e, de novo, logo antes do SMTP. O Portal aguarda a próxima abertura; o calendário de cada evento continua valendo, então um lembrete de dia passado vira `OBSOLETE`.
 
+## Contato financeiro
+
+`BILLING_FINANCE_CONTACT_EMAIL` é opcional e existe só neste serviço. Com um endereço válido, ele vira Reply-To e aparece como "Contato financeiro" nos templates financeiros. Vazio, nada muda. Valor inválido impede a subida quando `BILLING_EMAILS_ENABLED=true`. Não integra o evento nem o contrato, e os e-mails comerciais não o usam.
+
 ## HMAC e replay
 
 Headers: `x-itr-timestamp` (segundos Unix), `x-itr-nonce` (24 bytes aleatórios em base64url, 32 caracteres), `x-itr-signature` (hex minúsculo). HMAC-SHA256 com segredo decodificado de base64 sobre:

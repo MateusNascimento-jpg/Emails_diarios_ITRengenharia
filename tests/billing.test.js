@@ -349,3 +349,65 @@ test('D8: disponibilidade informa vencimento passado e acréscimos, sem percentu
     assert.match(render(p, Date.parse('2026-11-05T12:00:00Z')).texto, /Prazo restante nesta data: Vence hoje/);
     assert.match(render(p, Date.parse('2026-11-04T12:00:00Z')).texto, /Prazo restante nesta data: 1 dia/);
 });
+
+// D9: contato financeiro opcional, só neste serviço.
+const CONTACT = 'contato@example.test';
+const senderEnv = { BILLING_EMAILS_ENABLED: 'true', EMAIL_ATIVO: 'true' };
+const sendWith = async (env, p = event()) => {
+    let mail; const send = createSender({ sendMail: async m => { mail = m; return { accepted: [p.recipient], rejected: [] }; } }, { ...senderEnv, ...env });
+    await send({ event: p, pdfs: [{ content: pdf }], now, access: access(p) }); return mail;
+};
+const paymentAware = type => type === 'BOLETO_PAYMENT_RECORDED' ? { event: event(type), pdfs: [] } : { event: event(type), pdfs: [{ content: pdf }] };
+test('D9: sem configuração o comportamento não muda', async () => {
+    for (const env of [{}, { BILLING_FINANCE_CONTACT_EMAIL: '' }, { BILLING_FINANCE_CONTACT_EMAIL: '   ' }]) {
+        const mail = await sendWith(env);
+        assert.equal(Object.hasOwn(mail, 'replyTo'), false); assert.doesNotMatch(mail.text, /Contato financeiro/); assert.doesNotMatch(mail.html, /Contato financeiro/);
+        assert.equal(mail.html, render(event(), now, access(event())).html); assert.equal(mail.text, render(event(), now, access(event())).texto);
+    }
+});
+test('D9: configurado, vira Reply-To e aparece em todos os templates financeiros', async () => {
+    for (const type of EVENTS) {
+        let mail; const { event: p, pdfs } = paymentAware(type);
+        const send = createSender({ sendMail: async m => { mail = m; return { accepted: [p.recipient], rejected: [] }; } }, { ...senderEnv, BILLING_FINANCE_CONTACT_EMAIL: ' ' + CONTACT + ' ' });
+        await send({ event: p, pdfs, now, access: access(p) });
+        assert.equal(mail.replyTo, CONTACT, type); assert.equal(mail.to, p.recipient); assert.equal(mail.from, 'ITR Engenharia <naoresponda@itr.eng.br>');
+        assert.match(mail.text, /Contato financeiro: contato@example\.test/, type);
+        assert.match(mail.html, /Contato financeiro: <a href="mailto:contato%40example\.test"[^>]*>contato@example\.test<\/a>/, type);
+    }
+});
+test('D9: a variante só de dados também traz o contato, e o layout não muda além da linha', () => {
+    const base = event('BOLETO_UPDATED'), p = { ...base, previous: { sha256: base.document.sha256, dueDate: '2026-10-30', amountCents: base.amountCents } }; p.eventId = eventId(p);
+    const without = render(p, now), withContact = render(p, now, null, CONTACT);
+    assert.match(withContact.texto, /Dados|dados/); assert.match(withContact.texto, /Contato financeiro: contato@example\.test/);
+    assert.equal(withContact.html.replace(/<p style="font-size:14px;line-height:1\.7">Contato financeiro:.*?<\/p>/, ''), without.html);
+});
+test('D9: valores indevidos são recusados antes do SMTP e impedem a subida do serviço', async t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'itr-billing-test-')); t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const outside = path.join(directory, 'recibos'); fs.mkdirSync(outside);
+    const base = { BILLING_EMAILS_ENABLED: 'true', BILLING_RECEIPTS_DIRECTORY: outside, BILLING_HMAC_SECRET: secret, BILLING_PORTAL_ORIGIN: 'https://portal.example.test', EMAIL_ATIVO: 'true' };
+    assert.equal(configuration(base).enabled, true); assert.equal(configuration({ ...base, BILLING_FINANCE_CONTACT_EMAIL: CONTACT }).enabled, true);
+    for (const bad of ['financeiro', 'a@b', 'a@b.c\r\nBcc: x@y.test', 'a@b.c\nBcc: x@y.test', 'Maiuscula@example.test', 'a@example.test,b@example.test', 'a@example.test;b@example.test', 'a b@example.test', '<a@example.test>', 'ITR <a@example.test>', 'a@example.test b', 'x'.repeat(250) + '@example.test']) {
+        await assert.rejects(sendWith({ BILLING_FINANCE_CONTACT_EMAIL: bad }), /INVALID_BILLING_CONFIGURATION/, bad);
+        assert.throws(() => configuration({ ...base, BILLING_FINANCE_CONTACT_EMAIL: bad }), /INVALID_BILLING_CONFIGURATION/, bad);
+        assert.throws(() => render(event(), now, null, bad), /INVALID_BILLING_CONFIGURATION/, bad);
+    }
+});
+test('D9: o endereço é escapado no HTML', () => {
+    const { html } = render(event(), now, null, "a'b&c@example.test");
+    assert.match(html, />a&#39;b&amp;c@example\.test</); assert.doesNotMatch(html, /a'b&c@/);
+});
+test('D9: o contato não entra no contrato nem nos e-mails comerciais', () => {
+    const { valid: v } = require('../billing/contract'), p = event(); assert.equal(v({ ...p, contact: CONTACT }), false);
+    for (const file of ['enviar_email.js', 'email_template.js', 'access_email_template.js', 'security_email_template.js', 'integridade_email_template.js', 'billing/contract.js', 'billing/protocol.js'])
+        assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), /BILLING_FINANCE_CONTACT|Contato financeiro/, file);
+});
+test('D9: o exemplo documenta a variável sem endereço', () => {
+    const line = fs.readFileSync(path.join(__dirname, '../.env.example'), 'utf8').split(/\r?\n/).find(l => l.startsWith('BILLING_FINANCE_CONTACT_EMAIL'));
+    assert.equal(line, 'BILLING_FINANCE_CONTACT_EMAIL=');
+});
+test('D9: fluxo do receptor entrega o contato ao envio sem alterar o evento', async t => {
+    let mail; const p = event();
+    const send = createSender({ sendMail: async m => { mail = m; return { accepted: [p.recipient], rejected: [] }; } }, { ...senderEnv, BILLING_FINANCE_CONTACT_EMAIL: CONTACT });
+    const s = setup(t, { send }); assert.equal((await s.post(p)).body.code, 'SENT');
+    assert.equal(mail.replyTo, CONTACT); assert.equal(valid(p), true);
+});

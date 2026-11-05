@@ -4,6 +4,7 @@ const { hash, canonical, verify } = require('./protocol');
 const { valid, calendar, withinWindow } = require('./contract');
 const { Store } = require('./store');
 const { createPortal } = require('./portal');
+const { financeContact } = require('./smtp');
 const ROUTE = '/internal/billing/v1/events';
 function configuration(env = process.env) {
     if (!['true', 'false'].includes(env.BILLING_EMAILS_ENABLED || 'false')) throw new Error('INVALID_BILLING_FLAG');
@@ -14,6 +15,7 @@ function configuration(env = process.env) {
     if (!directory || !path.isAbsolute(directory) || !(relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) ||
         Buffer.from(secret || '', 'base64').length < 32 || origin.protocol !== 'https:' || origin.pathname !== '/' || origin.username || origin.password || origin.search || origin.hash ||
         env.EMAIL_ATIVO !== 'true' || String(env.EMAIL_MODO_TESTE || '').trim()) throw new Error('INVALID_BILLING_CONFIGURATION');
+    financeContact(env);
     return { enabled: true, directory, secret, origin: origin.origin };
 }
 function createReceiver({ config, send, fetcher, clock = Date.now }) {
