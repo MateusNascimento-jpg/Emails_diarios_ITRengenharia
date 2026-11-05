@@ -308,3 +308,44 @@ test('boleto atualizado passa pelo receptor e anexa o PDF', async t => {
     const r = await s.post(p); assert.equal(r.status, 200); assert.equal(s.messages.length, 1);
     assert.equal((await s.post(p)).body.code, 'ALREADY_SENT'); assert.equal(s.messages.length, 1);
 });
+test('D5: contrato Inadimplente é aceito na prova; outros status continuam recusados', async t => {
+    for (const type of ['BOLETO_AVAILABLE', 'BOLETO_UPDATED', 'NFSE_AVAILABLE', 'BOLETO_PAYMENT_RECORDED']) {
+        const s = setup(t, { proof: { contractStatus: 'Inadimplente' }, event: event(type) }); const r = await s.post(event(type));
+        assert.equal(r.body.code, 'SENT', type); assert.equal(s.messages.length, 1);
+    }
+    for (const contractStatus of ['Cancelado', 'Suspenso', 'Outro']) {
+        const s = setup(t, { proof: { contractStatus } }); assert.equal((await s.post(event())).body.code, 'PORTAL_VALIDATION_FAILED'); assert.equal(s.messages.length, 0);
+    }
+});
+test('D6: fora da janela o receptor não consulta o Portal nem envia, e o evento continua utilizável', async t => {
+    for (const time of ['00:01', '07:59', '18:00', '23:59']) {
+        let portal = 0; const at = Date.parse(`2026-11-04T${time}:00-03:00`), base = setup(t, { now: at });
+        const counted = createReceiver({ config: base.config, send: base.send, clock: () => at, fetcher: async (...a) => { portal++; return base.fetcher(...a); } });
+        const r = await base.post(event(), counted);
+        assert.equal(r.status, 503, time); assert.equal(r.body.code, 'OUTSIDE_SEND_WINDOW'); assert.equal(portal, 0); assert.equal(base.messages.length, 0);
+        const open = Date.parse('2026-11-04T08:00:00-03:00'); const later = setup(t, { now: open });
+        assert.equal((await later.post(event())).body.code, 'SENT');
+    }
+});
+test('D6: a janela vence logo antes do SMTP, sem gravar envio', async t => {
+    let at = Date.parse('2026-11-04T17:59:59-03:00'), calls = 0; const close = Date.parse('2026-11-04T18:00:00-03:00');
+    const base = setup(t, { now: at });
+    const receiver = createReceiver({ config: base.config, send: base.send, clock: () => at, fetcher: async (...a) => { const r = await base.fetcher(...a); if (++calls === 3) at = close; return r; } });
+    const r = await base.post(event(), receiver);
+    assert.equal(r.body.code, 'OUTSIDE_SEND_WINDOW'); assert.equal(base.messages.length, 0);
+    const store = new Store(base.config.directory); assert.equal(store.read('sending:' + event().eventId), null);
+});
+test('D6: janela usa São Paulo, inclui fins de semana e não muda nas datas de borda', () => {
+    const { withinWindow, nextOpening } = require('../billing/contract');
+    assert.equal(withinWindow(Date.parse('2026-11-08T12:00:00Z')), true); assert.equal(withinWindow(Date.parse('2026-11-08T11:00:00Z')), true); assert.equal(withinWindow(Date.parse('2026-11-08T10:59:00Z')), false);
+    assert.equal(withinWindow(Date.parse('2026-11-08T21:00:00Z')), false); assert.equal(nextOpening(Date.parse('2026-11-08T21:00:00Z')), Date.parse('2026-11-09T11:00:00Z'));
+});
+test('D8: disponibilidade informa vencimento passado e acréscimos, sem percentual', () => {
+    const p = event(), late = render(p, Date.parse('2026-11-08T12:00:00Z'));
+    for (const part of [late.html, late.texto]) assert.match(part, /O vencimento desta parcela ocorreu em 05\/11\/2026\. Aplicam-se os acréscimos previstos em contrato\./);
+    assert.doesNotMatch(late.texto, /%|juros de|multa de/i); assert.doesNotMatch(late.texto, /Prazo restante/);
+    for (const at of ['2026-11-04T12:00:00Z', '2026-11-05T12:00:00Z']) assert.doesNotMatch(render(p, Date.parse(at)).texto, /acréscimos|ocorreu em/);
+    const none = { ...p, dueDate: null }; none.eventId = eventId(none); assert.doesNotMatch(render(none, Date.parse('2026-11-08T12:00:00Z')).texto, /ocorreu em/);
+    assert.match(render(p, Date.parse('2026-11-05T12:00:00Z')).texto, /Prazo restante nesta data: Vence hoje/);
+    assert.match(render(p, Date.parse('2026-11-04T12:00:00Z')).texto, /Prazo restante nesta data: 1 dia/);
+});

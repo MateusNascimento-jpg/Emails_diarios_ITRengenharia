@@ -45,6 +45,10 @@ Valor e vencimento integram o eventId: alterá-los sem recalcular a chave invali
 
 `BOLETO_UPDATED` anuncia uma nova versão de boleto já notificado. Exige PDF de boleto, vencimento, valor e `previous` (`{sha256, dueDate, amountCents}` do que o cliente recebeu antes), que integra o eventId e precisa diferir dos dados atuais. O texto é escolhido pela comparação: SHA-256 diferente anuncia a substituição do documento; SHA-256 igual informa apenas os dados alterados. O receptor confere o SHA-256 dos bytes do PDF. É autorizado e entregue como os demais eventos de cobrança. A decisão de quando usá-lo pertence ao Portal, que cancela as intenções da versão anterior. Disponibilidade nunca substitui uma correção.
 
+## Janela de envio
+
+O envio ocorre das 08:00 às 18:00 em America/Sao_Paulo, todos os dias, com `withinWindow()` de `contract.js`. Fora dela, o receptor responde 503 `OUTSIDE_SEND_WINDOW` antes de consultar o Portal e, de novo, logo antes do SMTP. O Portal aguarda a próxima abertura; o calendário de cada evento continua valendo, então um lembrete de dia passado vira `OBSOLETE`.
+
 ## HMAC e replay
 
 Headers: `x-itr-timestamp` (segundos Unix), `x-itr-nonce` (24 bytes aleatórios em base64url, 32 caracteres), `x-itr-signature` (hex minúsculo). HMAC-SHA256 com segredo decodificado de base64 sobre:

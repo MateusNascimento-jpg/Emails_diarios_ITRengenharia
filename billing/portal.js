@@ -19,7 +19,7 @@ function createPortal(config, fetcher = fetch, clock = Date.now) {
         const a = JSON.parse(raw);
         if (a.protocol !== 'itr-billing-v1' || a.requestNonce !== signed['x-itr-nonce'] || a.eventDigest !== hash(canonical(p)) ||
             a.phase !== phase || a.authorized !== true || a.eligible !== true || a.chainVerified !== true ||
-            a.baselineVerified !== true || a.proposalStatus !== 'Aceita' || !['Ativo', 'Concluído'].includes(a.contractStatus) ||
+            a.baselineVerified !== true || a.proposalStatus !== 'Aceita' || !['Ativo', 'Concluído', 'Inadimplente'].includes(a.contractStatus) ||
             !Number.isSafeInteger(a.checkedAt) || a.checkedAt > clock() || clock() - a.checkedAt > 5000 ||
             !Number.isSafeInteger(a.expiresAt) || a.expiresAt <= clock() || a.expiresAt > a.checkedAt + 10000) throw new Error('NOT_AUTHORIZED');
         if (!['Aguardando Emissão da NF', 'A Vencer', 'Vencido', 'Pago'].includes(a.paymentStatus)) throw new Error('OBSOLETE');

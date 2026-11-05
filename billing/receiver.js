@@ -1,7 +1,7 @@
 'use strict';
 const path = require('node:path');
 const { hash, canonical, verify } = require('./protocol');
-const { valid, calendar } = require('./contract');
+const { valid, calendar, withinWindow } = require('./contract');
 const { Store } = require('./store');
 const { createPortal } = require('./portal');
 const ROUTE = '/internal/billing/v1/events';
@@ -40,6 +40,7 @@ function createReceiver({ config, send, fetcher, clock = Date.now }) {
             if (store.read('sending:' + p.eventId)) return reply(409, 'DELIVERY_UNCERTAIN', p.eventId);
             if (p.type !== 'NFSE_AVAILABLE' && p.type !== 'BOLETO_PAYMENT_RECORDED' && store.read('stopped:' + scope)) return reply(409, 'COLLECTION_STOPPED', p.eventId);
             if (!calendar(p, clock())) return reply(409, 'OBSOLETE', p.eventId);
+            if (!withinWindow(clock())) return reply(503, 'OUTSIDE_SEND_WINDOW', p.eventId);
             let pdfs, proof;
             try {
                 await portal.authorize(p, 'prepare');
@@ -48,6 +49,7 @@ function createReceiver({ config, send, fetcher, clock = Date.now }) {
             } catch { return reply(503, 'PORTAL_VALIDATION_FAILED', p.eventId); }
             if (!calendar(p, clock()) || proof.expiresAt <= clock()) return reply(409, 'OBSOLETE', p.eventId);
             if (proof.paymentStatus === 'Pago') store.create('stopped:' + scope, { at: clock() });
+            if (!withinWindow(clock())) return reply(503, 'OUTSIDE_SEND_WINDOW', p.eventId);
             store.create('sending:' + p.eventId, { at: clock() });
             // From this point every failure requires reconciliation, never automatic resend.
             try {

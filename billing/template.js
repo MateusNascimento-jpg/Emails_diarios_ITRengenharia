@@ -25,7 +25,10 @@ function dataCorrection(p) {
 function render(p, now = Date.now(), access = null) {
     if (!valid(p)) throw new Error('INVALID_EVENT');
     if (access !== null && !validAccess(access, p)) throw new Error('ACCESS_SCOPE_INVALID');
-    const [title, copy] = p.type === 'BOLETO_UPDATED' && p.previous.sha256 === p.document.sha256 ? dataCorrection(p) : COPY[p.type];
+    const [title, base] = p.type === 'BOLETO_UPDATED' && p.previous.sha256 === p.document.sha256 ? dataCorrection(p) : COPY[p.type];
+    // Availability may stand in for that day's reminder, so it states an elapsed due date itself.
+    const overdue = p.type === 'BOLETO_AVAILABLE' && p.dueDate && p.dueDate < today(now);
+    const copy = overdue ? `${base}\n\nO vencimento desta parcela ocorreu em ${civil(p.dueDate)}. Aplicam-se os acréscimos previstos em contrato.` : base;
     const rows = [['Contrato', p.contractName], ['Parcela', p.installment]];
     if (p.amountCents !== null) rows.push(['Valor da parcela', money(p.amountCents)]);
     if (p.dueDate) rows.push(['Vencimento', civil(p.dueDate)]);

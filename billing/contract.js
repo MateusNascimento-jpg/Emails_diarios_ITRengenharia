@@ -9,6 +9,17 @@ const email = x => typeof x === 'string' && x === x.toLowerCase() && x.length <=
 function exact(o, keys) { return o && typeof o === 'object' && !Array.isArray(o) && Object.keys(o).length === keys.length && keys.every(k => Object.hasOwn(o, k)); }
 function date(x) { return typeof x === 'string' && /^20\d{2}-\d{2}-\d{2}$/.test(x) && Number.isFinite(Date.parse(x)) && new Date(x).toISOString().slice(0, 10) === x; }
 function today(now) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now)); }
+// Sending window in São Paulo, in minutes of the day: 08:00 inclusive to 18:00 exclusive, every day.
+const WINDOW_OPEN = 480, WINDOW_CLOSE = 1080;
+function minuteOfDay(now) {
+    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Sao_Paulo', hourCycle: 'h23', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(now));
+    return Number(parts.find(p => p.type === 'hour').value) * 60 + Number(parts.find(p => p.type === 'minute').value);
+}
+function withinWindow(now) { const m = minuteOfDay(now); return m >= WINDOW_OPEN && m < WINDOW_CLOSE; }
+function nextOpening(now) {
+    const m = minuteOfDay(now), wait = m < WINDOW_OPEN ? WINDOW_OPEN - m : 1440 - m + WINDOW_OPEN;
+    return now - now % 60000 + wait * 60000;
+}
 function eventId(p) {
     // Identity is the content plus the data it states: attachment URL/ID changes do not trigger a resend.
     const version = p.type === 'BOLETO_PAYMENT_RECORDED' ? p.transitionId : p.document?.sha256;
@@ -63,4 +74,4 @@ function calendar(p, now) {
     const delta = { BOLETO_D_MINUS_1: 1, BOLETO_DUE_TODAY: 0 }[p.type];
     return delta === undefined || (Date.parse(p.dueDate) - Date.parse(today(now))) / 86400000 === delta;
 }
-module.exports = { EVENTS, MAX_PDF, valid, eventId, date, today, calendar, email, validAccess };
+module.exports = { EVENTS, MAX_PDF, valid, eventId, date, today, calendar, email, validAccess, withinWindow, nextOpening };
