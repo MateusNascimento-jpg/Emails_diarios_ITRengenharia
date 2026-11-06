@@ -9,7 +9,7 @@ const { EVENTS, valid, eventId, date, calendar, MAX_PDF } = require('../billing/
 const { headers, canonical, hash } = require('../billing/protocol');
 const { createReceiver, configuration, ROUTE, register } = require('../billing/receiver');
 const { render } = require('../billing/template');
-const { createSender } = require('../billing/smtp');
+const { createSender, confirmPassword } = require('../billing/smtp');
 const { Store } = require('../billing/store');
 const secret = Buffer.alloc(32, 7).toString('base64');
 const now = Date.parse('2026-11-04T12:00:00Z');
@@ -18,7 +18,7 @@ function setup(t, modify = {}) {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'itr-billing-test-'));
     t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
     const config = { enabled: true, directory, secret, origin: 'https://portal.example.test' };
-    const messages = [];
+    const messages = [], phases = [];
     const fetcher = async (url, options) => {
         assert.equal(new URL(url).origin, config.origin); assert.equal(options.redirect, 'error');
         if (options.method === 'GET') {
@@ -28,19 +28,21 @@ function setup(t, modify = {}) {
                 'x-itr-document-kind': p.document.kind, 'x-itr-document-version': p.document.version, ...modify.pdfHeaders } });
         }
         const { event: p, phase } = JSON.parse(options.body);
+        phases.push(phase);
         let proof = { protocol: 'itr-billing-v1', phase, requestNonce: options.headers['x-itr-nonce'], eventDigest: hash(canonical(p)),
             authorized: true, eligible: true, chainVerified: true, baselineVerified: true, proposalStatus: 'Aceita', contractStatus: 'Ativo',
             checkedAt: now, expiresAt: now + 5000, paymentStatus: p.type === 'BOLETO_PAYMENT_RECORDED' ? 'Pago' : 'Aguardando Emissão da NF',
-            collectionStopped: false, documentPayable: true, payableAfterDue: true, newPaymentTransition: true, leaseId: 'd'.repeat(64), ...modify.proof };
+            collectionStopped: false, documentPayable: true, payableAfterDue: true, newPaymentTransition: true, leaseId: 'd'.repeat(64), access: access(p), ...modify.proof };
         if (modify.final && phase === 'smtp') proof = { ...proof, ...modify.final };
         if (phase === 'smtp') for (const key of modify.omitFinal || []) delete proof[key];
         const raw = canonical(proof);
         return new Response(raw, { headers: { ...headers(secret, 'RESPONSE', '/internal/billing/v1/authorize', raw, now), ...modify.authHeaders } });
     };
     const send = modify.send || (async args => { messages.push(args); return { ok: true }; });
-    const receiver = createReceiver({ config, fetcher, send, clock: () => now });
+    const credentials = modify.credentials || (async () => password);
+    const receiver = createReceiver({ config, fetcher, send, credentials, clock: () => now });
     const post = (p, r = receiver, h) => { const raw = Buffer.from(JSON.stringify(p)); return r.handle({ method: 'POST', path: ROUTE, headers: h || headers(secret, 'POST', ROUTE, raw, now) }, raw); };
-    return { config, messages, fetcher, send, receiver, post };
+    return { config, messages, phases, fetcher, send, credentials, receiver, post };
 }
 for (const type of EVENTS) test('evento e PDF correto: ' + type, async t => {
     const p = event(type);
@@ -110,7 +112,7 @@ test('pagamento registrado bloqueia todas as ocorrências e destinatários poste
 });
 test('todos os templates têm o botão e o bloco Dados de acesso, com CNPJ validado e senha', () => {
     for (const type of EVENTS) {
-        const p = event(type), without = render(p, now), withAccess = render(p, now, access(p), null, password), noPassword = render(p, now, access(p));
+        const p = event(type), without = render(p, now), withAccess = render(p, now, access(p), null, password);
         for (const part of [withAccess.html, withAccess.texto]) {
             assert.match(part, /https:\/\/portal\.itr\.eng\.br\/login\.html/); assert.match(part, /Dados de acesso/);
             assert.match(part, /Mantenha estes dados protegidos\./); assert.doesNotMatch(part, /Recuperar acesso|recuperar-senha|Acesso ao Portal do Cliente/);
@@ -119,48 +121,112 @@ test('todos os templates têm o botão e o bloco Dados de acesso, com CNPJ valid
         assert.match(withAccess.texto, /Dados de acesso\nCNPJ: 12\.345\.678\/0001-95\nSenha: EX123456\nMantenha estes dados protegidos\./);
         assert.ok(withAccess.html.indexOf('cid:portalCta') < withAccess.html.indexOf('Dados de acesso'));
         assert.doesNotMatch(withAccess.assunto, /EX123456/);
-        for (const part of [noPassword.html, noPassword.texto]) { assert.match(part, /Dados de acesso/); assert.match(part, /CNPJ: 12\.345\.678\/0001-95/); assert.doesNotMatch(part, /Senha:|Mantenha/); }
+        assert.throws(() => render(p, now, access(p)), /ACCESS_NOT_CONFIRMED/);
         for (const part of [without.html, without.texto, render(p, now, null, null, password).html]) assert.doesNotMatch(part, /Dados de acesso|Senha:|EX123456/);
         for (const part of [without.html, without.texto, withAccess.assunto, without.assunto]) assert.doesNotMatch(part, /CNPJ|12\.?345\.?678|0001-?95/);
         assert.equal(valid({ ...p, cnpj: '12345678000195' }), false);
     }
 });
-test('CNPJ da prova final chega ao SMTP e não aos recibos; prova ausente não inventa identidade', async t => {
-    const p = event(); let mail;
-    const sender = createSender({ sendMail: async m => { mail = m; return { accepted: [p.recipient] }; } }, { BILLING_EMAILS_ENABLED: 'true', EMAIL_ATIVO: 'true' });
-    const s = setup(t, { proof: { access: access(p) }, send: sender });
-    assert.equal((await s.post(p)).status, 200); assert.match(mail.html, /12\.345\.678\/0001-95/); assert.match(mail.text, /12\.345\.678\/0001-95/); assert.doesNotMatch(mail.subject, /CNPJ|12\.?345/);
-    const absent = setup(t, { proof: { access: access(p) }, final: { access: null }, send: sender });
-    assert.equal((await absent.post(p)).status, 200); assert.doesNotMatch(JSON.stringify(mail), /CNPJ|12\.?345\.?678|0001-?95/);
-    const persisted = fs.readdirSync(s.config.directory).map(f => fs.readFileSync(path.join(s.config.directory, f), 'utf8')).join('');
-    assert.doesNotMatch(persisted, /12345678000195|financeiro@example/);
-});
-test('a senha vem da mesma fonte da proposta, chega ao SMTP e fica fora dos recibos', async t => {
+const onlyEnv = { BILLING_EMAILS_ENABLED: 'true', EMAIL_ATIVO: 'true' };
+const persistedIn = s => fs.readdirSync(s.config.directory).map(f => fs.readFileSync(path.join(s.config.directory, f), 'utf8')).join('');
+test('CNPJ e senha chegam completos ao SMTP e ficam fora dos recibos', async t => {
     const p = event(); let mail; const calls = [];
-    const sender = createSender({ sendMail: async m => { mail = m; return { accepted: [p.recipient] }; } }, { BILLING_EMAILS_ENABLED: 'true', EMAIL_ATIVO: 'true' }, async (...a) => { calls.push(a); return password; });
-    const s = setup(t, { proof: { access: access(p) }, send: sender });
+    const send = createSender({ sendMail: async m => { mail = m; return { accepted: [p.recipient] }; } }, onlyEnv);
+    const s = setup(t, { send, credentials: a => confirmPassword(async (...x) => { calls.push(x); return password; }, a) });
     assert.equal((await s.post(p)).status, 200);
     assert.deepEqual(calls[0].slice(0, 2), ['12345678000195', p.recipient]);
-    assert.match(mail.html, /<strong>Senha:<\/strong> EX123456/); assert.match(mail.text, /Senha: EX123456/);
-    assert.doesNotMatch(mail.subject + JSON.stringify(mail.attachments.map(a => a.filename)), /EX123456/);
-    const persisted = fs.readdirSync(s.config.directory).map(f => fs.readFileSync(path.join(s.config.directory, f), 'utf8')).join('');
-    assert.doesNotMatch(persisted, /EX123456/);
-    assert.match(fs.readFileSync(path.join(__dirname, '..', 'enviar_email.js'), 'utf8'), /require\('\.\/proposals\/access'\)\.accessForEmail/);
+    assert.match(mail.html, /CNPJ: 12\.345\.678\/0001-95<br><strong>Senha:<\/strong> EX123456/); assert.match(mail.text, /CNPJ: 12\.345\.678\/0001-95\nSenha: EX123456/);
+    assert.doesNotMatch(mail.subject + JSON.stringify(mail.attachments.map(a => a.filename)), /EX123456|12\.?345/);
+    assert.doesNotMatch(persistedIn(s), /EX123456|12345678000195|financeiro@example/);
+    assert.match(fs.readFileSync(path.join(__dirname, '..', 'billing', 'receiver.js'), 'utf8'), /confirmPassword\(require\('\.\.\/proposals\/access'\)\.accessForEmail, access\)/);
 });
-test('sem senha confirmada o aviso segue só com o CNPJ, sem expor dados no log', async t => {
-    const p = event(); const logs = []; const warn = t.mock.method(console, 'warn', m => logs.push(m));
-    const attempts = [async () => null, async () => { throw Object.assign(new Error(p.recipient), { transient: true }); }, () => new Promise(() => {}), async () => 'com\nquebra', async (c, r, o) => { o.onDecision('FINANCE_RECIPIENT_NOT_AUTHORIZED'); return null; }];
-    for (const resolve of attempts) {
-        let mail;
-        await createSender({ sendMail: async m => { mail = m; return { accepted: [p.recipient] }; } }, { BILLING_EMAILS_ENABLED: 'true', EMAIL_ATIVO: 'true' }, resolve, 20)({ event: p, pdfs: [{ content: pdf }], now, access: access(p) });
-        assert.match(mail.html, /CNPJ: 12\.345\.678\/0001-95/); assert.doesNotMatch(mail.html, /Senha:|Mantenha/);
+const NOT_CONFIRMED = {
+    'indisponibilidade da consulta': { resolve: async () => { throw Object.assign(new Error('financeiro@example.test'), { transient: true }); }, log: /ACCESS_NOT_CONFIRMED/ },
+    'timeout da consulta': { resolve: () => new Promise(() => {}), log: /ACCESS_LOOKUP_TIMEOUT/ },
+    'destinatário sem autorização': { resolve: async (c, r, o) => { o.onDecision('FINANCE_RECIPIENT_NOT_AUTHORIZED'); return null; }, log: /FINANCE_RECIPIENT_NOT_AUTHORIZED/ },
+    'cadastro ambíguo': { resolve: async (c, r, o) => { o.onDecision('OPERATIONAL_PASSWORD_AMBIGUOUS'); return null; }, log: /OPERATIONAL_PASSWORD_AMBIGUOUS/ },
+    'credencial com quebra de linha': { resolve: async () => 'com\nquebra', log: /ACCESS_NOT_CONFIRMED/ },
+    'credencial vazia': { resolve: async () => '   ', log: /ACCESS_NOT_CONFIRMED/ },
+    'credencial que não é texto': { resolve: async () => 123456, log: /ACCESS_NOT_CONFIRMED/ },
+};
+for (const [name, { resolve, log }] of Object.entries(NOT_CONFIRMED)) test(`sem senha confirmada nada é enviado e o evento segue reenviável: ${name}`, async t => {
+    const p = event(), logs = []; let lookup = resolve, sent = 0, mail;
+    t.mock.method(console, 'warn', m => logs.push(m));
+    const send = createSender({ sendMail: async m => { sent++; mail = m; return { accepted: [p.recipient] }; } }, onlyEnv);
+    const s = setup(t, { send, credentials: a => confirmPassword((...x) => lookup(...x), a, 20) });
+    const blocked = await s.post(p);
+    // The only answer the Portal retries with no SMTP and no lease left behind, and no final proof was asked for.
+    assert.equal(blocked.status, 503); assert.equal(blocked.body.code, 'PORTAL_VALIDATION_FAILED');
+    assert.equal(sent, 0); assert.deepEqual(s.phases, ['prepare']);
+    const store = new Store(s.config.directory);
+    assert.equal(store.read('sending:' + p.eventId), null); assert.equal(store.read('sent:' + p.eventId), null);
+    assert.match(logs.join(''), log); assert.doesNotMatch(logs.join(''), /12345678000195|financeiro@example|quebra/);
+    // Same event, once the source answers: one single complete message, then the receipt answers.
+    lookup = async () => password;
+    assert.equal((await s.post(p)).body.code, 'SENT'); assert.equal(sent, 1);
+    assert.match(mail.html, /CNPJ: 12\.345\.678\/0001-95<br><strong>Senha:<\/strong> EX123456/);
+    lookup = () => assert.fail('consulta após o envio');
+    assert.equal((await s.post(p)).body.code, 'ALREADY_SENT'); assert.equal(sent, 1);
+});
+test('resolvedor real: Airtable fora do ar, recusa ou cadastro sem sigla bloqueiam; cadastro válido envia', async t => {
+    const { accessForEmail } = require('../proposals/access');
+    t.mock.method(console, 'warn', () => {});
+    const env = { AIRTABLE_TOKEN: 'simulado', AIRTABLE_BASE_ID: 'appAAAAAAAAAAAAAA', AIRTABLE_FINANCE_BASE_ID: 'appFFFFFFFFFFFFFF' };
+    const cnpj = access(event()).cnpj, recipient = event().recipient;
+    const finance = { records: [{ id: 'rec1', fields: { fldb8XcWv0Uooz3Uo: cnpj, fldtqo76edbzzQcNz: recipient } }] };
+    const directory = sigla => ({ records: [{ id: 'rec2', fields: { CNPJ: cnpj, 'Sigla Cliente': sigla } }] });
+    const answer = (body, status = 200) => new Response(JSON.stringify(body), { status });
+    const byBase = operational => async url => String(url).includes('appFFFFFFFFFFFFFF') ? answer(finance) : operational();
+    const run = async fetcher => {
+        const p = event(), s = setup(t, { credentials: a => confirmPassword((c, r, o) => accessForEmail(c, r, { ...o, env, fetcher }), a, 200) });
+        return { reply: await s.post(p), s, p };
+    };
+    for (const fetcher of [async () => answer({}, 503), async () => answer({}, 429), async () => answer({}, 403), async () => { throw new TypeError('fetch failed'); },
+        byBase(async () => answer({}, 503)), byBase(async () => answer(directory(''))), byBase(async () => answer({ records: [] }))]) {
+        const { reply, s, p } = await run(fetcher);
+        assert.equal(reply.status, 503); assert.equal(reply.body.code, 'PORTAL_VALIDATION_FAILED'); assert.equal(s.messages.length, 0);
+        assert.equal(new Store(s.config.directory).read('sending:' + p.eventId), null);
     }
-    assert.equal(logs.length, attempts.length); assert.match(logs[2], /ACCESS_LOOKUP_TIMEOUT/); assert.match(logs[4], /FINANCE_RECIPIENT_NOT_AUTHORIZED/);
-    assert.doesNotMatch(logs.join(''), /12345678000195|financeiro@example/);
-    let called = false, mail;
-    await createSender({ sendMail: async m => { mail = m; return { accepted: [p.recipient] }; } }, { BILLING_EMAILS_ENABLED: 'true', EMAIL_ATIVO: 'true' }, async () => { called = true; return password; })({ event: p, pdfs: [{ content: pdf }], now });
-    assert.equal(called, false); assert.doesNotMatch(mail.html, /Dados de acesso/);
-    warn.mock.restore();
+    const { reply, s } = await run(byBase(async () => answer(directory('EX'))));
+    assert.equal(reply.body.code, 'SENT'); assert.equal(s.messages[0].password, 'EX123456');
+});
+test('prova sem identidade ou com identidade diferente na fase final não envia', async t => {
+    const p = event();
+    for (const modify of [{ proof: { access: null } }, { final: { access: null } }, { omitFinal: ['access'] }, { final: { access: { ...access(p), cnpj: '11222333000181' } } }]) {
+        const s = setup(t, modify), r = await s.post(p);
+        assert.equal(r.status, 503); assert.equal(r.body.code, 'PORTAL_VALIDATION_FAILED'); assert.equal(s.messages.length, 0);
+        assert.equal(new Store(s.config.directory).read('sending:' + p.eventId), null);
+    }
+});
+test('receptor montado sem consulta de senha: o remetente real recusa, sem SMTP e sem reenvio', async t => {
+    const p = event(), base = setup(t), send = createSender({ sendMail: () => assert.fail('SMTP') }, onlyEnv);
+    const bare = createReceiver({ config: base.config, fetcher: base.fetcher, send, clock: () => now });
+    assert.equal((await base.post(p, bare)).body.code, 'DELIVERY_UNCERTAIN');
+    assert.equal((await base.post(p, bare)).body.code, 'DELIVERY_UNCERTAIN');
+});
+test('a rota de produção sempre consulta a senha: sem cadastro confirmado, nada é enviado', async t => {
+    const express = require('express'), p = event(), base = setup(t), warn = t.mock.method(console, 'warn', () => {});
+    let sends = 0; const app = express();
+    // No credentials option here: the same default wiring as server.js, and no Airtable configuration to read from.
+    register(app, express, { config: base.config, fetcher: base.fetcher, clock: () => now, send: async () => { sends++; return { ok: true }; } });
+    const server = app.listen(0, '127.0.0.1'); t.after(() => new Promise(done => server.close(done)));
+    await new Promise(done => server.once('listening', done));
+    const raw = JSON.stringify(p), response = await fetch(`http://127.0.0.1:${server.address().port}${ROUTE}`, { method: 'POST', body: raw, headers: { 'content-type': 'application/json', ...headers(secret, 'POST', ROUTE, raw, now) } });
+    assert.equal(response.status, 503); assert.equal((await response.json()).code, 'PORTAL_VALIDATION_FAILED');
+    assert.equal(sends, 0); assert.ok(warn.mock.calls.length > 0);
+});
+test('entrega incerta não consulta a senha nem reenvia', async t => {
+    const p = event(); let lookups = 0, attempts = 0;
+    const s = setup(t, { credentials: async () => { lookups++; return password; }, send: async () => { attempts++; throw new Error('SMTP_TIMEOUT'); } });
+    assert.equal((await s.post(p)).body.code, 'DELIVERY_UNCERTAIN');
+    assert.equal(lookups, 1); assert.equal(attempts, 1);
+    assert.equal((await s.post(p)).body.code, 'DELIVERY_UNCERTAIN');
+    assert.equal(lookups, 1); assert.equal(attempts, 1);
+});
+test('o remetente recusa mensagem sem o bloco completo, mesmo chamado diretamente', async () => {
+    const p = event(), send = createSender({ sendMail: () => assert.fail('SMTP') }, onlyEnv), pdfs = [{ content: pdf }];
+    for (const args of [{}, { access: access(p) }, { password }, { access: access(p), password: '  ' }, { access: access(p), password: 'a\nb' }])
+        await assert.rejects(send({ event: p, pdfs, now, ...args }), /ACCESS_NOT_CONFIRMED/);
 });
 test('CNPJ adulterado, vínculo errado e campos de senha na prova são rejeitados', async t => {
     const p = event();
@@ -226,23 +292,23 @@ test('flag desligada, configuração, lock órfão falha fechado', async t => {
     const s = setup(t), p = event(); new Store(s.config.directory).lock(canonical([p.clientId, p.contractId, p.invoiceId]));
     assert.equal((await s.post(p)).body.code, 'BUSY');
 });
-test('HTML escapado, SMTP fake MIME, sem senha ou destinatários adicionais', async () => {
+test('HTML escapado, SMTP fake MIME, sem destinatários adicionais', async () => {
     const p = event(); p.installment = '<img src=x onerror=alert(1)>'; const rendered = render(p, now);
     assert.match(rendered.html, /&lt;img/); assert.doesNotMatch(rendered.html, /<img src=x|Senha:|CNPJ/);
     let mail;
     const send = createSender({ sendMail: async message => { mail = message; return { accepted: [p.recipient], rejected: [] }; } }, { BILLING_EMAILS_ENABLED: 'true', EMAIL_ATIVO: 'true' });
-    assert.equal((await send({ event: p, pdfs: [{ content: pdf }], now })).ok, true);
+    assert.equal((await send({ event: p, pdfs: [{ content: pdf }], now, access: access(p), password })).ok, true);
     assert.equal(mail.to, p.recipient); assert.equal(mail.cc, undefined); assert.equal(mail.bcc, undefined);
     assert.equal(mail.attachments.length, 3); assert.equal(mail.disableUrlAccess, true);
     assert.equal(mail.attachments[2].filename, 'Boleto.pdf');
     assert.equal(mail.from, 'ITR Engenharia <naoresponda@itr.eng.br>');
     const configured = createSender({ sendMail: async message => { mail = message; return { accepted: [p.recipient], rejected: [] }; } }, { BILLING_EMAILS_ENABLED: 'true', EMAIL_ATIVO: 'true', EMAIL_REMETENTE: 'ITR Teste <financeiro@example.test>' });
-    await configured({ event: p, pdfs: [{ content: pdf }], now });
+    await configured({ event: p, pdfs: [{ content: pdf }], now, access: access(p), password });
     assert.equal(mail.from, 'ITR Teste <financeiro@example.test>', 'mesmo remetente configurado dos demais fluxos');
 });
 test('rota HTTP isolada, JSON bruto, autenticação e limite', async t => {
     const express = require('express'), app = express(), s = setup(t);
-    register(app, express, { config: s.config, send: s.send, fetcher: s.fetcher, clock: () => now });
+    register(app, express, { config: s.config, send: s.send, fetcher: s.fetcher, credentials: s.credentials, clock: () => now });
     const server = app.listen(0, '127.0.0.1'); await new Promise(r => server.once('listening', r)); t.after(() => new Promise(r => server.close(r)));
     const url = `http://127.0.0.1:${server.address().port}${ROUTE}`, body = JSON.stringify(event());
     assert.equal((await fetch(url, { method: 'POST', body, headers: headers(secret, 'POST', ROUTE, body, now) })).status, 200);
@@ -269,8 +335,8 @@ test('SMTP financeiro desativado e pagamento sem boleto', async () => {
     await assert.rejects(off({ event: event(), pdfs: [{ content: pdf }] }));
     const p = event('BOLETO_PAYMENT_RECORDED'); let mail;
     const send = createSender({ sendMail: async m => { mail = m; return { accepted: [p.recipient] }; } }, { BILLING_EMAILS_ENABLED: 'true', EMAIL_ATIVO: 'true' });
-    await send({ event: p, pdfs: [], now }); assert.equal(mail.attachments.length, 2);
-    await assert.rejects(send({ event: p, pdfs: [{ content: pdf }], now }));
+    await send({ event: p, pdfs: [], now, access: access(p), password }); assert.equal(mail.attachments.length, 2);
+    await assert.rejects(send({ event: p, pdfs: [{ content: pdf }], now, access: access(p), password }), /INVALID_PDF/);
 });
 test('lembrete vencido informa os acréscimos sem percentual e sem afirmar validação financeira', () => {
     const p = event('BOLETO_OVERDUE_REMINDER'), { html, texto } = render(p, Date.parse(p.scheduledFor + 'T12:00:00Z'));
@@ -362,7 +428,7 @@ test('D6: fora da janela o receptor não consulta o Portal nem envia, e o evento
 test('D6: a janela vence logo antes do SMTP, sem gravar envio', async t => {
     let at = Date.parse('2026-11-04T17:59:59-03:00'), calls = 0; const close = Date.parse('2026-11-04T18:00:00-03:00');
     const base = setup(t, { now: at });
-    const receiver = createReceiver({ config: base.config, send: base.send, clock: () => at, fetcher: async (...a) => { const r = await base.fetcher(...a); if (++calls === 3) at = close; return r; } });
+    const receiver = createReceiver({ config: base.config, send: base.send, credentials: base.credentials, clock: () => at, fetcher: async (...a) => { const r = await base.fetcher(...a); if (++calls === 3) at = close; return r; } });
     const r = await base.post(event(), receiver);
     assert.equal(r.body.code, 'OUTSIDE_SEND_WINDOW'); assert.equal(base.messages.length, 0);
     const store = new Store(base.config.directory); assert.equal(store.read('sending:' + event().eventId), null);
@@ -387,21 +453,21 @@ const CONTACT = 'contato@example.test';
 const senderEnv = { BILLING_EMAILS_ENABLED: 'true', EMAIL_ATIVO: 'true' };
 const sendWith = async (env, p = event()) => {
     let mail; const send = createSender({ sendMail: async m => { mail = m; return { accepted: [p.recipient], rejected: [] }; } }, { ...senderEnv, ...env });
-    await send({ event: p, pdfs: [{ content: pdf }], now, access: access(p) }); return mail;
+    await send({ event: p, pdfs: [{ content: pdf }], now, access: access(p), password }); return mail;
 };
 const paymentAware = type => type === 'BOLETO_PAYMENT_RECORDED' ? { event: event(type), pdfs: [] } : { event: event(type), pdfs: [{ content: pdf }] };
 test('D9: sem configuração o comportamento não muda', async () => {
     for (const env of [{}, { BILLING_FINANCE_CONTACT_EMAIL: '' }, { BILLING_FINANCE_CONTACT_EMAIL: '   ' }]) {
         const mail = await sendWith(env);
         assert.equal(Object.hasOwn(mail, 'replyTo'), false); assert.doesNotMatch(mail.text, /Contato financeiro/); assert.doesNotMatch(mail.html, /Contato financeiro/);
-        assert.equal(mail.html, render(event(), now, access(event())).html); assert.equal(mail.text, render(event(), now, access(event())).texto);
+        assert.equal(mail.html, render(event(), now, access(event()), null, password).html); assert.equal(mail.text, render(event(), now, access(event()), null, password).texto);
     }
 });
 test('D9: configurado, vira Reply-To e aparece em todos os templates financeiros', async () => {
     for (const type of EVENTS) {
         let mail; const { event: p, pdfs } = paymentAware(type);
         const send = createSender({ sendMail: async m => { mail = m; return { accepted: [p.recipient], rejected: [] }; } }, { ...senderEnv, BILLING_FINANCE_CONTACT_EMAIL: ' ' + CONTACT + ' ' });
-        await send({ event: p, pdfs, now, access: access(p) });
+        await send({ event: p, pdfs, now, access: access(p), password });
         assert.equal(mail.replyTo, CONTACT, type); assert.equal(mail.to, p.recipient); assert.equal(mail.from, 'ITR Engenharia <naoresponda@itr.eng.br>');
         assert.match(mail.text, /Contato financeiro: contato@example\.test/, type);
         assert.match(mail.html, /Contato financeiro: <a href="mailto:contato%40example\.test"[^>]*>contato@example\.test<\/a>/, type);

@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { main, generate, scenario, NOTICE } = require('../scripts/billing-homologacao');
-const { scenarios, access } = require('../billing/fixtures');
+const { scenarios, access, password } = require('../billing/fixtures');
 const { render } = require('../billing/template');
 const TO = 'homologacao@example.test';
 const ARGS = ['--enviar', '--cenario=01_BOLETO_DISPONIVEL', `--destinatario=${TO}`];
@@ -33,7 +33,7 @@ test('o pacote traz dez prévias marcadas e os dois PDFs fictícios; o template 
         assert.ok(html.includes(NOTICE)); assert.match(html, /Dados de acesso/); assert.match(html, /12\.345\.678\/0001-95/); assert.match(html, /<strong>Senha:<\/strong> EX123456/); assert.doesNotMatch(html, /cid:/);
     }
     const p = scenarios()[0];
-    assert.doesNotMatch(render(p.event, p.now, access(p.event)).html, /HOMOLOGA/i);
+    assert.doesNotMatch(render(p.event, p.now, access(p.event), null, password).html, /HOMOLOGA/i);
     assert.throws(() => generate(path.join(directory, 'pacote')), /PASTA_NAO_VAZIA/);
 });
 test('sem confirmação nenhuma conexão SMTP é aberta', async () => {

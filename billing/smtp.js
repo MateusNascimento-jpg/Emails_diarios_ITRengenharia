@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { valid, email } = require('./contract');
 const { hash } = require('./protocol');
-const { render } = require('./template');
+const { render, validPassword } = require('./template');
 // Optional and configured only here: never part of the event or of the Portal contract.
 function financeContact(env = process.env) {
     const value = String(env.BILLING_FINANCE_CONTACT_EMAIL || '').trim();
@@ -11,28 +11,32 @@ function financeContact(env = process.env) {
     if (!email(value)) throw new Error('INVALID_BILLING_CONFIGURATION');
     return value;
 }
-// Same source as the accepted-proposal e-mail, never part of the event, proof or receipts. The receiver has already
-// recorded the start of SMTP here, so a failed lookup must not stop the notice: the block keeps only the CNPJ.
-async function accessPassword(resolve, access, limit) {
-    if (!resolve || !access) return null;
+// Same source as the accepted-proposal e-mail, never part of the event, proof or receipts. Called by the receiver ahead
+// of the final proof and of its `sending` record: a null answer stops this message while the Portal can still retry it.
+async function confirmPassword(resolve, access, limit = 5000) {
     let reason = 'ACCESS_NOT_CONFIRMED', timer;
     try {
+        if (!resolve || !access) return null;
         const password = await Promise.race([
             resolve(access.cnpj, access.recipient, { onDecision: code => { reason = code; } }),
             new Promise((_, reject) => { timer = setTimeout(reject, limit, new Error('ACCESS_LOOKUP_TIMEOUT')); }),
         ]);
-        if (typeof password === 'string' && password.trim() && !/[\r\n]/.test(password)) return password;
+        if (validPassword(password)) { reason = null; return password; }
+        return null;
     } catch (error) {
         if (error?.message === 'ACCESS_LOOKUP_TIMEOUT') reason = error.message;
-    } finally { clearTimeout(timer); }
-    console.warn(`[FINANCEIRO] ${/^[A-Z_]+$/.test(reason) ? reason : 'ACCESS_NOT_CONFIRMED'}: e-mail sem a linha de senha.`);
-    return null;
+        return null;
+    } finally {
+        clearTimeout(timer);
+        if (reason) console.warn(`[FINANCEIRO] ${/^[A-Z_]+$/.test(reason) ? reason : 'ACCESS_NOT_CONFIRMED'}: envio bloqueado antes do SMTP.`);
+    }
 }
-function createSender(transport, env = process.env, resolveAccess = null, lookupLimit = 5000) {
-    return async ({ event, pdfs, now, access = null }) => {
+function createSender(transport, env = process.env) {
+    return async ({ event, pdfs, now, access = null, password = null }) => {
         if (env.BILLING_EMAILS_ENABLED !== 'true' || env.EMAIL_ATIVO !== 'true' || String(env.EMAIL_MODO_TESTE || '').trim() || !valid(event)) throw new Error('BILLING_SMTP_DISABLED');
         if (!Array.isArray(pdfs) || pdfs.length !== (event.document ? 1 : 0) || pdfs.some(p => !Buffer.isBuffer(p.content) || p.content.length !== event.document.size || hash(p.content) !== event.document.sha256 || p.content.subarray(0, 5).toString() !== '%PDF-')) throw new Error('INVALID_PDF');
-        const contact = financeContact(env), password = await accessPassword(resolveAccess, access, lookupLimit), message = render(event, now, access, contact, password);
+        if (!access || !validPassword(password)) throw new Error('ACCESS_NOT_CONFIRMED');
+        const contact = financeContact(env), message = render(event, now, access, contact, password);
         const attachments = ['logo.png', 'portal-cta.png'].map((name, i) => ({ filename: name,
             content: fs.readFileSync(path.join(__dirname, '..', 'assets', name)), cid: i ? 'portalCta' : 'logoITR', contentDisposition: 'inline' }));
         attachments.push(...pdfs.map(p => ({ content: p.content, filename: event.document.kind === 'nfse' ? 'NFSe.pdf' : 'Boleto.pdf', contentType: 'application/pdf', contentDisposition: 'attachment' })));
@@ -42,4 +46,4 @@ function createSender(transport, env = process.env, resolveAccess = null, lookup
         return { ok: info.accepted?.length === 1 && String(info.accepted[0]).toLowerCase() === event.recipient && !info.rejected?.length };
     };
 }
-module.exports = { createSender, financeContact };
+module.exports = { createSender, financeContact, confirmPassword };

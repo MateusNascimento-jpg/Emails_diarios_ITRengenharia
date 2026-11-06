@@ -4,7 +4,8 @@ const { hash, canonical, verify } = require('./protocol');
 const { valid, calendar, withinWindow } = require('./contract');
 const { Store } = require('./store');
 const { createPortal } = require('./portal');
-const { financeContact } = require('./smtp');
+const { financeContact, confirmPassword } = require('./smtp');
+const { validPassword } = require('./template');
 const ROUTE = '/internal/billing/v1/events';
 function configuration(env = process.env) {
     if (!['true', 'false'].includes(env.BILLING_EMAILS_ENABLED || 'false')) throw new Error('INVALID_BILLING_FLAG');
@@ -18,7 +19,7 @@ function configuration(env = process.env) {
     financeContact(env);
     return { enabled: true, directory, secret, origin: origin.origin };
 }
-function createReceiver({ config, send, fetcher, clock = Date.now }) {
+function createReceiver({ config, send, fetcher, clock = Date.now, credentials = null }) {
     const store = config.enabled ? new Store(config.directory) : null;
     const portal = config.enabled ? createPortal(config, fetcher, clock) : null;
     const reply = (status, code, eventId) => ({ status, body: { ok: status === 200, code, eventId } });
@@ -43,11 +44,19 @@ function createReceiver({ config, send, fetcher, clock = Date.now }) {
             if (p.type !== 'NFSE_AVAILABLE' && p.type !== 'BOLETO_PAYMENT_RECORDED' && store.read('stopped:' + scope)) return reply(409, 'COLLECTION_STOPPED', p.eventId);
             if (!calendar(p, clock())) return reply(409, 'OBSOLETE', p.eventId);
             if (!withinWindow(clock())) return reply(503, 'OUTSIDE_SEND_WINDOW', p.eventId);
-            let pdfs, proof;
+            let pdfs, proof, password;
             try {
-                await portal.authorize(p, 'prepare');
+                const prepared = await portal.authorize(p, 'prepare');
+                // Ahead of the lease and of `sending`: without a confirmed password nothing started, and the Portal
+                // retries this code with no SMTP. register() always wires this; the real sender refuses without it.
+                if (credentials) {
+                    password = await credentials(prepared.access ?? null);
+                    if (!prepared.access || !validPassword(password)) throw new Error('ACCESS_NOT_CONFIRMED');
+                }
                 pdfs = await portal.document(p);
                 proof = await portal.authorize(p, 'smtp');
+                // The password was confirmed for this identity only.
+                if (canonical(proof.access ?? null) !== canonical(prepared.access)) throw new Error('ACCESS_CHANGED');
             } catch { return reply(503, 'PORTAL_VALIDATION_FAILED', p.eventId); }
             if (!calendar(p, clock()) || proof.expiresAt <= clock()) return reply(409, 'OBSOLETE', p.eventId);
             if (proof.paymentStatus === 'Pago') store.create('stopped:' + scope, { at: clock() });
@@ -55,7 +64,7 @@ function createReceiver({ config, send, fetcher, clock = Date.now }) {
             store.create('sending:' + p.eventId, { at: clock() });
             // From this point every failure requires reconciliation, never automatic resend.
             try {
-                const result = await send({ event: p, pdfs, now: clock(), access: proof.access ?? null });
+                const result = await send({ event: p, pdfs, now: clock(), access: proof.access ?? null, password });
                 if (!result?.ok) return reply(409, 'DELIVERY_UNCERTAIN', p.eventId);
                 store.create('sent:' + p.eventId, { at: clock(), digest });
                 return reply(200, 'SENT', p.eventId);
@@ -66,7 +75,8 @@ function createReceiver({ config, send, fetcher, clock = Date.now }) {
 }
 function register(app, express, options = {}) {
     const config = options.config || configuration();
-    const receiver = createReceiver({ config, send: options.send || (args => require('../enviar_email').enviarFinanceiro(args)), fetcher: options.fetcher, clock: options.clock });
+    const receiver = createReceiver({ config, send: options.send || (args => require('../enviar_email').enviarFinanceiro(args)), fetcher: options.fetcher, clock: options.clock,
+        credentials: options.credentials || (access => confirmPassword(require('../proposals/access').accessForEmail, access)) });
     // Fixed global budget, no unbounded per-IP map. Independent from existing limits.
     let minute = 0, count = 0;
     app.post(ROUTE, (req, res, next) => {

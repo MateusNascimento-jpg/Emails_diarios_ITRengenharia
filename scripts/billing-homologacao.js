@@ -62,8 +62,8 @@ async function sendOne({ id, recipient }, env, createTransport) {
             attachments: message.attachments.map(a => a.contentType === 'application/pdf' ? { ...a, filename: 'HOMOLOGACAO_' + a.filename } : a) });
     } };
     // Fixed configuration: production flags are neither read nor changed, and the finance contact stays out.
-    const send = createSender(marked, { BILLING_EMAILS_ENABLED: 'true', EMAIL_ATIVO: 'true', EMAIL_REMETENTE: env.EMAIL_REMETENTE || '' }, async () => password);
-    try { return await send({ event, pdfs, now, access: access(event) }); } finally { transport.close?.(); }
+    const send = createSender(marked, { BILLING_EMAILS_ENABLED: 'true', EMAIL_ATIVO: 'true', EMAIL_REMETENTE: env.EMAIL_REMETENTE || '' });
+    try { return await send({ event, pdfs, now, access: access(event), password }); } finally { transport.close?.(); }
 }
 async function main(argv, env, createTransport, log = console.log) {
     const option = name => argv.find(a => a.startsWith(`--${name}=`))?.slice(name.length + 3);
@@ -73,7 +73,7 @@ async function main(argv, env, createTransport, log = console.log) {
     const id = option('cenario'), recipient = option('destinatario');
     if (!email(recipient)) throw new Error('DESTINATARIO_INVALIDO');
     const { event, now } = scenario(id, recipient);
-    log(`Assunto: [HOMOLOGAÇÃO] ${render(event, now, access(event)).assunto}\nDestinatário: ${recipient}`);
+    log(`Assunto: [HOMOLOGAÇÃO] ${render(event, now, access(event), null, password).assunto}\nDestinatário: ${recipient}`);
     if (!argv.includes(CONFIRM)) { log(`Simulação: nada foi enviado. Para enviar, use ${CONFIRM}.`); return 'SIMULADO'; }
     const result = await sendOne({ id, recipient }, env, createTransport);
     if (!result.ok) throw new Error('ENTREGA_NAO_CONFIRMADA');
