@@ -108,23 +108,22 @@ test('pagamento registrado bloqueia todas as ocorrências e destinatários poste
     }
     assert.equal(s.messages.length, 1);
 });
-test('todos os templates têm acesso oficial, CNPJ só com contexto validado e nenhuma senha', () => {
+test('todos os templates têm acesso oficial, sem CNPJ e sem senha, mesmo com a prova validada', () => {
     for (const type of EVENTS) {
         const p = event(type), without = render(p, now), withAccess = render(p, now, access(p));
         for (const part of [without.html, without.texto, withAccess.html, withAccess.texto]) {
             assert.match(part, /Acesso ao Portal do Cliente/); assert.match(part, /https:\/\/portal\.itr\.eng\.br\/login\.html/);
             assert.doesNotMatch(part, /senha|password/i);
         }
-        assert.doesNotMatch(without.html, /CNPJ:/); assert.match(withAccess.html, /12\.345\.678\/0001-95/);
-        assert.match(withAccess.texto, /12\.345\.678\/0001-95/);
+        for (const part of [without.html, without.texto, withAccess.html, withAccess.texto, withAccess.assunto]) assert.doesNotMatch(part, /CNPJ|12\.?345\.?678|0001-?95/);
         assert.equal(valid({ ...p, cnpj: '12345678000195' }), false);
     }
 });
-test('CNPJ da prova final chega ao SMTP; prova ausente não inventa identidade', async t => {
+test('CNPJ da prova final não chega ao e-mail nem aos recibos, com ou sem prova', async t => {
     const p = event(); let mail;
     const sender = createSender({ sendMail: async m => { mail = m; return { accepted: [p.recipient] }; } }, { BILLING_EMAILS_ENABLED: 'true', EMAIL_ATIVO: 'true' });
     const s = setup(t, { proof: { access: access(p) }, send: sender });
-    assert.equal((await s.post(p)).status, 200); assert.match(mail.html, /12\.345\.678\/0001-95/);
+    assert.equal((await s.post(p)).status, 200); assert.doesNotMatch(JSON.stringify(mail), /CNPJ|12\.?345\.?678|0001-?95/);
     const absent = setup(t, { proof: { access: access(p) }, final: { access: null }, send: sender });
     assert.equal((await absent.post(p)).status, 200); assert.doesNotMatch(mail.html, /CNPJ:/);
     const persisted = fs.readdirSync(s.config.directory).map(f => fs.readFileSync(path.join(s.config.directory, f), 'utf8')).join('');
