@@ -93,11 +93,11 @@ Na fase smtp, o Portal deve reservar uma intenção de entrega serializada por p
 
 ## Identificação de acesso ao Portal
 
-Todos os templates HTML e texto incluem o bloco "Acesso ao Portal do Cliente" e https://portal.itr.eng.br/login.html. O evento continua sem CNPJ. A resposta assinada de authorize pode fornecer `access: {clientId, recipient, cnpj}`: objeto fechado, IDs/destinatário exatamente iguais ao evento e CNPJ numérico normalizado de 14 dígitos. A assinatura cobre access e eventDigest na mesma prova, vinculando identidade, cliente, documento e autorização atual. O Portal deve obter o CNPJ da fonte autoritativa da cadeia verificada, nunca ecoar um dado arbitrário. A validação sintática do receptor não substitui essa comprovação.
+Todos os templates HTML e texto incluem o botão https://portal.itr.eng.br/login.html e, com prova válida, o bloco "Dados de acesso", igual ao do e-mail de aceite da proposta. O evento continua sem CNPJ. A resposta assinada de authorize pode fornecer `access: {clientId, recipient, cnpj}`: objeto fechado, IDs/destinatário exatamente iguais ao evento e CNPJ numérico normalizado de 14 dígitos. A assinatura cobre access e eventDigest na mesma prova, vinculando identidade, cliente, documento e autorização atual. O Portal deve obter o CNPJ da fonte autoritativa da cadeia verificada, nunca ecoar um dado arbitrário. A validação sintática do receptor não substitui essa comprovação.
 
-Contexto presente mas inválido, cliente diferente ou destinatário diferente bloqueiam o envio. O bloco nunca exibe o CNPJ, com ou sem contexto (decisão de 06/11/2026): o contexto segue obrigatório na validação da prova, mas não entra no e-mail. O receptor utiliza exclusivamente o contexto da prova final smtp; não reutiliza o da fase prepare nem grava CNPJ nos recibos/logs. O SMTP e o template recebem o contexto em argumento separado do payload; chamadores internos devem fornecer apenas contexto da prova autenticada.
+Contexto presente mas inválido, cliente diferente ou destinatário diferente bloqueiam o envio. Com contexto válido, o bloco exibe o CNPJ formatado; sem contexto, o bloco não aparece. O receptor utiliza exclusivamente o contexto da prova final smtp; não reutiliza o da fase prepare nem grava CNPJ nos recibos/logs. O SMTP e o template recebem o contexto em argumento separado do payload; chamadores internos devem fornecer apenas contexto da prova autenticada.
 
-Nenhuma senha permanente é consultada ou enviada. Eventual exigência de acesso com senha depende de decisão formal de negócio/segurança e de desenho aprovado; não está implementada nem autorizada.
+A senha vem da mesma fonte do e-mail de aceite (`proposals/access.js`, `accessForEmail`), consultada em `enviarFinanceiro` depois da prova final, em leitura no Airtable com limite de 5 segundos. Ela não entra no evento, na prova, na assinatura, nos recibos nem nos logs. **Diferença em relação à proposta:** se a senha não for confirmada, o aviso financeiro é enviado só com o CNPJ, com um código não sensível no log, porque o receptor já registrou o início do SMTP e um erro nesse ponto bloquearia o aviso. A senha é derivada do CNPJ e permanente: enviá-la em lembretes recorrentes foi decisão de negócio de 06/11/2026, e o risco segue em `docs/BILLING_SEGURANCA_SENHA.md`, no Portal.
 
 ## Download autenticado
 
@@ -136,7 +136,20 @@ node --test tests/*.test.js
 npm.cmd test
 Get-ChildItem billing -Filter '*.js' | ForEach-Object { node --check $_.FullName }
 node billing/preview.js
+node scripts/billing-homologacao.js --saida=<pasta-nova>
 git diff --check
 ```
 
 O guard é exclusivo de testes: impede dotenv e conexões externas; mocks injetados e HTTP loopback continuam disponíveis. Não iniciar server.js para testar. Previews autossuficientes com imagens locais incorporadas estão em `billing/previews/`, um HTML por evento, mais exemplo adicional D+10 (BOLETO_OVERDUE_REMINDER_D10.html); o preview principal de recorrência representa D+5. O CNPJ dos previews é exclusivamente fictício. Não representam envio nem homologação em Gmail/Outlook.
+
+## Teste SMTP de homologação
+
+`scripts/billing-homologacao.js` gera o pacote dos dez cenários com os dois PDFs fictícios de `billing/homologacao/` e, só por pedido explícito, envia **um** cenário a **um** destinatário controlado. Usa o template e o `createSender` oficiais, com dados fictícios, faixa de homologação no corpo, prefixo `[HOMOLOGAÇÃO]` no assunto e PDFs renomeados. Não acessa Portal, Airtable, MySQL, outbox nem recibos, e não é chamado por testes, cron ou servidor.
+
+```powershell
+node scripts/billing-homologacao.js --saida=C:\caminho\pasta-nova
+# Simulação: mostra o que seria enviado, sem conectar ao SMTP.
+node scripts/billing-homologacao.js --enviar --cenario=01_BOLETO_DISPONIVEL --destinatario=pessoa@dominio
+# Envio real: exige também BILLING_HOMOLOGACAO_DESTINATARIO igual ao destinatário.
+node scripts/billing-homologacao.js --enviar --cenario=01_BOLETO_DISPONIVEL --destinatario=pessoa@dominio --confirmar-envio-real
+```

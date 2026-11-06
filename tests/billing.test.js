@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { event, pdf, access } = require('../billing/fixtures');
+const { event, pdf, access, password } = require('../billing/fixtures');
 const { EVENTS, valid, eventId, date, calendar, MAX_PDF } = require('../billing/contract');
 const { headers, canonical, hash } = require('../billing/protocol');
 const { createReceiver, configuration, ROUTE, register } = require('../billing/receiver');
@@ -108,26 +108,59 @@ test('pagamento registrado bloqueia todas as ocorrências e destinatários poste
     }
     assert.equal(s.messages.length, 1);
 });
-test('todos os templates têm acesso oficial, sem CNPJ e sem senha, mesmo com a prova validada', () => {
+test('todos os templates têm o botão e o bloco Dados de acesso, com CNPJ validado e senha', () => {
     for (const type of EVENTS) {
-        const p = event(type), without = render(p, now), withAccess = render(p, now, access(p));
-        for (const part of [without.html, without.texto, withAccess.html, withAccess.texto]) {
-            assert.match(part, /Acesso ao Portal do Cliente/); assert.match(part, /https:\/\/portal\.itr\.eng\.br\/login\.html/);
-            assert.doesNotMatch(part, /senha|password/i);
+        const p = event(type), without = render(p, now), withAccess = render(p, now, access(p), null, password), noPassword = render(p, now, access(p));
+        for (const part of [withAccess.html, withAccess.texto]) {
+            assert.match(part, /https:\/\/portal\.itr\.eng\.br\/login\.html/); assert.match(part, /Dados de acesso/);
+            assert.match(part, /Mantenha estes dados protegidos\./); assert.doesNotMatch(part, /Recuperar acesso|recuperar-senha|Acesso ao Portal do Cliente/);
         }
-        for (const part of [without.html, without.texto, withAccess.html, withAccess.texto, withAccess.assunto]) assert.doesNotMatch(part, /CNPJ|12\.?345\.?678|0001-?95/);
+        assert.match(withAccess.html, /<strong>Dados de acesso<\/strong><br>CNPJ: 12\.345\.678\/0001-95<br><strong>Senha:<\/strong> EX123456<br>Mantenha estes dados protegidos\./);
+        assert.match(withAccess.texto, /Dados de acesso\nCNPJ: 12\.345\.678\/0001-95\nSenha: EX123456\nMantenha estes dados protegidos\./);
+        assert.ok(withAccess.html.indexOf('cid:portalCta') < withAccess.html.indexOf('Dados de acesso'));
+        assert.doesNotMatch(withAccess.assunto, /EX123456/);
+        for (const part of [noPassword.html, noPassword.texto]) { assert.match(part, /Dados de acesso/); assert.match(part, /CNPJ: 12\.345\.678\/0001-95/); assert.doesNotMatch(part, /Senha:|Mantenha/); }
+        for (const part of [without.html, without.texto, render(p, now, null, null, password).html]) assert.doesNotMatch(part, /Dados de acesso|Senha:|EX123456/);
+        for (const part of [without.html, without.texto, withAccess.assunto, without.assunto]) assert.doesNotMatch(part, /CNPJ|12\.?345\.?678|0001-?95/);
         assert.equal(valid({ ...p, cnpj: '12345678000195' }), false);
     }
 });
-test('CNPJ da prova final não chega ao e-mail nem aos recibos, com ou sem prova', async t => {
+test('CNPJ da prova final chega ao SMTP e não aos recibos; prova ausente não inventa identidade', async t => {
     const p = event(); let mail;
     const sender = createSender({ sendMail: async m => { mail = m; return { accepted: [p.recipient] }; } }, { BILLING_EMAILS_ENABLED: 'true', EMAIL_ATIVO: 'true' });
     const s = setup(t, { proof: { access: access(p) }, send: sender });
-    assert.equal((await s.post(p)).status, 200); assert.doesNotMatch(JSON.stringify(mail), /CNPJ|12\.?345\.?678|0001-?95/);
+    assert.equal((await s.post(p)).status, 200); assert.match(mail.html, /12\.345\.678\/0001-95/); assert.match(mail.text, /12\.345\.678\/0001-95/); assert.doesNotMatch(mail.subject, /CNPJ|12\.?345/);
     const absent = setup(t, { proof: { access: access(p) }, final: { access: null }, send: sender });
-    assert.equal((await absent.post(p)).status, 200); assert.doesNotMatch(mail.html, /CNPJ:/);
+    assert.equal((await absent.post(p)).status, 200); assert.doesNotMatch(JSON.stringify(mail), /CNPJ|12\.?345\.?678|0001-?95/);
     const persisted = fs.readdirSync(s.config.directory).map(f => fs.readFileSync(path.join(s.config.directory, f), 'utf8')).join('');
     assert.doesNotMatch(persisted, /12345678000195|financeiro@example/);
+});
+test('a senha vem da mesma fonte da proposta, chega ao SMTP e fica fora dos recibos', async t => {
+    const p = event(); let mail; const calls = [];
+    const sender = createSender({ sendMail: async m => { mail = m; return { accepted: [p.recipient] }; } }, { BILLING_EMAILS_ENABLED: 'true', EMAIL_ATIVO: 'true' }, async (...a) => { calls.push(a); return password; });
+    const s = setup(t, { proof: { access: access(p) }, send: sender });
+    assert.equal((await s.post(p)).status, 200);
+    assert.deepEqual(calls[0].slice(0, 2), ['12345678000195', p.recipient]);
+    assert.match(mail.html, /<strong>Senha:<\/strong> EX123456/); assert.match(mail.text, /Senha: EX123456/);
+    assert.doesNotMatch(mail.subject + JSON.stringify(mail.attachments.map(a => a.filename)), /EX123456/);
+    const persisted = fs.readdirSync(s.config.directory).map(f => fs.readFileSync(path.join(s.config.directory, f), 'utf8')).join('');
+    assert.doesNotMatch(persisted, /EX123456/);
+    assert.match(fs.readFileSync(path.join(__dirname, '..', 'enviar_email.js'), 'utf8'), /require\('\.\/proposals\/access'\)\.accessForEmail/);
+});
+test('sem senha confirmada o aviso segue só com o CNPJ, sem expor dados no log', async t => {
+    const p = event(); const logs = []; const warn = t.mock.method(console, 'warn', m => logs.push(m));
+    const attempts = [async () => null, async () => { throw Object.assign(new Error(p.recipient), { transient: true }); }, () => new Promise(() => {}), async () => 'com\nquebra', async (c, r, o) => { o.onDecision('FINANCE_RECIPIENT_NOT_AUTHORIZED'); return null; }];
+    for (const resolve of attempts) {
+        let mail;
+        await createSender({ sendMail: async m => { mail = m; return { accepted: [p.recipient] }; } }, { BILLING_EMAILS_ENABLED: 'true', EMAIL_ATIVO: 'true' }, resolve, 20)({ event: p, pdfs: [{ content: pdf }], now, access: access(p) });
+        assert.match(mail.html, /CNPJ: 12\.345\.678\/0001-95/); assert.doesNotMatch(mail.html, /Senha:|Mantenha/);
+    }
+    assert.equal(logs.length, attempts.length); assert.match(logs[2], /ACCESS_LOOKUP_TIMEOUT/); assert.match(logs[4], /FINANCE_RECIPIENT_NOT_AUTHORIZED/);
+    assert.doesNotMatch(logs.join(''), /12345678000195|financeiro@example/);
+    let called = false, mail;
+    await createSender({ sendMail: async m => { mail = m; return { accepted: [p.recipient] }; } }, { BILLING_EMAILS_ENABLED: 'true', EMAIL_ATIVO: 'true' }, async () => { called = true; return password; })({ event: p, pdfs: [{ content: pdf }], now });
+    assert.equal(called, false); assert.doesNotMatch(mail.html, /Dados de acesso/);
+    warn.mock.restore();
 });
 test('CNPJ adulterado, vínculo errado e campos de senha na prova são rejeitados', async t => {
     const p = event();
@@ -195,7 +228,7 @@ test('flag desligada, configuração, lock órfão falha fechado', async t => {
 });
 test('HTML escapado, SMTP fake MIME, sem senha ou destinatários adicionais', async () => {
     const p = event(); p.installment = '<img src=x onerror=alert(1)>'; const rendered = render(p, now);
-    assert.match(rendered.html, /&lt;img/); assert.doesNotMatch(rendered.html, /<img src=x|Senha:|CNPJ:/);
+    assert.match(rendered.html, /&lt;img/); assert.doesNotMatch(rendered.html, /<img src=x|Senha:|CNPJ/);
     let mail;
     const send = createSender({ sendMail: async message => { mail = message; return { accepted: [p.recipient], rejected: [] }; } }, { BILLING_EMAILS_ENABLED: 'true', EMAIL_ATIVO: 'true' });
     assert.equal((await send({ event: p, pdfs: [{ content: pdf }], now })).ok, true);
