@@ -249,7 +249,7 @@ test('lembrete vencido informa os acréscimos sem percentual e sem afirmar valid
     assert.doesNotMatch(texto, /%/); // O HTML tem larguras em %.
     assert.match(texto, /Valor da parcela: R\$/);
     for (const type of ['BOLETO_AVAILABLE', 'BOLETO_D_MINUS_1', 'BOLETO_DUE_TODAY', 'BOLETO_PAYMENT_RECORDED', 'NFSE_AVAILABLE'])
-        assert.doesNotMatch(render(event(type)).texto, /acréscimos/, type);
+        assert.doesNotMatch(render(event(type), Date.parse('2026-11-04T12:00:00Z')).texto, /acréscimos/, type); // Data fixa: com vencimento passado, a disponibilidade informa os acréscimos (D8).
 });
 test('BOLETO_UPDATED exige documento de boleto, vencimento e valor', () => {
     const p = event('BOLETO_UPDATED'); assert.equal(valid(p), true);
